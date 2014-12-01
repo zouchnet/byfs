@@ -152,57 +152,41 @@ func sendFile(w http.ResponseWriter, r *http.Request) {
 func saveFile(w http.ResponseWriter, r *http.Request) {
 	file := pathToFile(r.URL.Path)
 
-	needMove = false
-
 	d, err := os.Stat(file)
-
-	if err != nil {
-		dir, _f := path.Split(file)
-
-		err := os.MkdirAll(dir, 644)
-
-		f, err = os.openFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
-		if err != nil {
-			http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
-			log.Println("saveFile open Error", err, r.RemoteAddr)
-			return
-		}
-		defer f.Close()
-	} else {
-		if d.IsDir() {
-			http.Error(w, "403 Forbidden", http.StatusForbidden)
-			log.Println("PUT To Dir Error", r.URL.Path,  r.RemoteAddr)
-			return
-		} else {
-			//防止因为网络问题破坏文件
-			tmp_file = file + ".tmp"
-			f, err := os.openFile(tmp_file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
-			if err != nil {
-				http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
-				log.Println("saveFile open Error", err, r.RemoteAddr)
-				return
-			}
-
-			needMove = true
-		}
-	}
-
-	_, err = io.Copy(f, w)
-	if err != nil {
-		http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
-		log.Println("Copy Error", err, r.RemoteAddr)
+	if d.IsDir() {
+		http.Error(w, "400 BadRequest", http.StatusBadRequest)
+		log.Println("PUT To Dir Error", r.URL.Path,  r.RemoteAddr)
 		return
 	}
 
-	if needMove {
-		err = os.Remove(file)
+	dir, _ := path.Split(name)
+	err := os.MkdirAll(dir, 644)
+	if err != nil {
+		http.Error(w, "400 BadRequest", http.StatusBadRequest)
+		log.Println("Mkdir Error", err, r.URL.Path, r.RemoteAddr)
+		return
+	}
 
-		err = os.Rename(tmp_file, file)
+	m, err := openMagicFile(file)
+	if err != nil {
+		http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
+		log.Println("saveFile open Error", err, r.URL.Path, r.RemoteAddr)
+		return
+	}
+	defer func() {
+		err := m.Close()
+
 		if err != nil {
 			http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
-			log.Println("Copy Error", err, r.RemoteAddr)
-			return
+			log.Println("Close Error", err, r.URL.Path, r.RemoteAddr)
 		}
+	}()
+
+	_, err = io.Copy(f, w)
+	if err != nil {
+		http.Error(w, "400 BadRequest", http.StatusBadRequest)
+		log.Println("Copy Error", err, r.URL.Path, r.RemoteAddr)
+		return
 	}
 }
 
@@ -223,3 +207,51 @@ func postStream(w http.ResponseWriter, r *http.Request) {
 
 }
 
+struct magicFile {
+	f *os.File
+	isGhost bool
+	tmp string
+	file string
+}
+
+func openMagicFile(name string) (*magicFile, error) {
+	m := &magicFile{}
+
+	m.f, err = os.openFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
+	if err != nil {
+		//如果文件己存在则尝试用临时文件的方式打开
+		if os.IsExist(err) {
+			tmp_file = name + ".tmp"
+			m.f, err = os.openFile(tmp_file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
+			if err != nil {
+				return nil, errors.New("Open Tmpfile Error " + err.Error())
+			}
+			m.isGhost = true
+			m.file = name
+			m.tmp = tmp_file
+		} else {
+			return nil, errors.New("Open File Error " + err.Error())
+		}
+	}
+
+	return m, nil
+}
+
+func (m *magicFile) Close() error {
+	err := m.f.Close()
+	if err != nil {
+		return err
+	}
+
+	err = os.Remove(m.file)
+	if err != nil {
+		return err
+	}
+
+	err = os.Rename(m.tmp, m.file)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
