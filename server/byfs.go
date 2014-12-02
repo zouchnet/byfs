@@ -19,7 +19,7 @@ var listenAddr = flag.String("addr", ":8080", "Listen Addr")
 var password = flag.String("auth", "", "Auth Token")
 var dirroot = flag.String("dir", ".", "file dir")
 
-var fileMode os.FileMode = 0666
+var fileMode os.FileMode = 0644
 
 func main() {
 	flag.Parse()
@@ -66,6 +66,14 @@ func httpServer() {
 }
 
 func methodRouter(w http.ResponseWriter, r *http.Request) {
+	defer func() {
+		err := recover()
+		if err != nil {
+			http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
+			log.Println("Error", err, r.URL.Path, r.RemoteAddr)
+		}
+	}()
+
 	if *serverName != "" {
 		w.Header.Set("ps", *serverName)
 	}
@@ -150,47 +158,63 @@ func sendFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func saveFile(w http.ResponseWriter, r *http.Request) {
-	file := pathToFile(r.URL.Path)
-
-	d, err := os.Stat(file)
-	if d.IsDir() {
-		http.Error(w, "400 BadRequest", http.StatusBadRequest)
-		log.Println("PUT To Dir Error", r.URL.Path,  r.RemoteAddr)
-		return
-	}
+	name := pathToFile(r.URL.Path)
 
 	dir, _ := path.Split(name)
-	err := os.MkdirAll(dir, 644)
+	err := os.MkdirAll(dir, fileMode)
 	if err != nil {
-		http.Error(w, "400 BadRequest", http.StatusBadRequest)
-		log.Println("Mkdir Error", err, r.URL.Path, r.RemoteAddr)
+		fmt.Fprintln(w, "Mkdir Error", err)
+		log.Println("Notice", "Mkdir Error", err, r.URL.Path, r.RemoteAddr)
 		return
 	}
 
-	m, err := openMagicFile(file)
+	f, err = os.openFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
 	if err != nil {
-		http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
-		log.Println("saveFile open Error", err, r.URL.Path, r.RemoteAddr)
+		fmt.Fprintln(w, "Open File Error", err)
+		log.Println("Notice", "Open File Error", err, r.URL.Path, r.RemoteAddr)
 		return
 	}
-	defer func() {
-		err := m.Close()
-
-		if err != nil {
-			http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
-			log.Println("Close Error", err, r.URL.Path, r.RemoteAddr)
-		}
-	}()
 
 	_, err = io.Copy(f, w)
-	if err != nil {
-		http.Error(w, "400 BadRequest", http.StatusBadRequest)
-		log.Println("Copy Error", err, r.URL.Path, r.RemoteAddr)
+
+	err2 := f.Close()
+	if err2 != nil {
+		panic(err)
+	}
+
+	if err == nil {
+		fmt.Fprintln(w, "Success", err)
 		return
 	}
+
+	err = os.Remove(m.file)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Fprintln(w, "Save Data Error", err)
+	log.Println("Notice", "Copy Error", err, r.URL.Path, r.RemoteAddr)
 }
 
 func deleteFile(w http.ResponseWriter, r *http.Request) {
+	file := pathToFile(r.URL.Path)
+
+	var err error
+
+	force := r.Header().Get("byfs-force")
+	if force == "1" {
+		err = os.RemoveAll(file)
+	} else {
+		err = os.Remove(file)
+	}
+
+	if err != nil {
+		fmt.Fprintln(w, "Delete Fail")
+		log.Println("Notice", "Delete Fail", err, r.URL.Path, r.RemoteAddr)
+		return
+	}
+
+	fmt.Fprintln(w, "Success", err)
 }
 
 func postStream(w http.ResponseWriter, r *http.Request) {
@@ -207,51 +231,4 @@ func postStream(w http.ResponseWriter, r *http.Request) {
 
 }
 
-struct magicFile {
-	f *os.File
-	isGhost bool
-	tmp string
-	file string
-}
 
-func openMagicFile(name string) (*magicFile, error) {
-	m := &magicFile{}
-
-	m.f, err = os.openFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
-	if err != nil {
-		//如果文件己存在则尝试用临时文件的方式打开
-		if os.IsExist(err) {
-			tmp_file = name + ".tmp"
-			m.f, err = os.openFile(tmp_file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
-			if err != nil {
-				return nil, errors.New("Open Tmpfile Error " + err.Error())
-			}
-			m.isGhost = true
-			m.file = name
-			m.tmp = tmp_file
-		} else {
-			return nil, errors.New("Open File Error " + err.Error())
-		}
-	}
-
-	return m, nil
-}
-
-func (m *magicFile) Close() error {
-	err := m.f.Close()
-	if err != nil {
-		return err
-	}
-
-	err = os.Remove(m.file)
-	if err != nil {
-		return err
-	}
-
-	err = os.Rename(m.tmp, m.file)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
