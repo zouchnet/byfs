@@ -115,14 +115,15 @@ class Byfs
 
 		$file = substr($file, strlen('byfs://'));
 
-		$salt = dechex(mt_rand(0, 100000000));
-		$auth = md5(self::$auth . $file . $salt);
-
 		$headers = array();
 		$headers[] = "byfs: 1";
 		if ($method != 'GET') {
 			$headers[] = "Content-Type: application/octet-stream";
-			$headers[] = "auth: {$auth}{$salt}";
+			if (self::$auth) {
+				$salt = dechex(mt_rand(0, 100000000));
+				$auth = md5(self::$auth . $file . $salt);
+				$headers[] = "auth: {$auth}{$salt}";
+			}
 		}
 
 		$opts = array(
@@ -139,7 +140,7 @@ class Byfs
 
 		$url = 'http://'.self::$server.":".self::$port.'/'. $file;
 
-		return fopen($file, 'r+b', false, $ctx);
+		return fopen($url, 'r', false, $ctx);
 	}
 
 

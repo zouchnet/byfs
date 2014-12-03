@@ -7,8 +7,8 @@ import (
 	"os"
 	"log"
 	"path"
-	"path/filepath"
-	//"strings"
+	//"path/filepath"
+	"strings"
 	"os/signal"
 	"net/http"
 	"crypto/md5"
@@ -56,13 +56,14 @@ func initFilesystem() {
 	}
 }
 
-func pathToFile(path string) string {
-	return path.Clean(*dirroot + "/" + path)
+func pathToFile(p string) string {
+	return path.Clean(*dirroot + "/" + p)
 }
 
 func httpServer() {
 	http.HandleFunc("/", methodRouter)
-	http.ListenAndServe(*listenAddr, nil)
+	err := http.ListenAndServe(*listenAddr, nil)
+	log.Fatalln(err)
 }
 
 func methodRouter(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +76,7 @@ func methodRouter(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	if *serverName != "" {
-		w.Header.Set("ps", *serverName)
+		w.Header().Set("ps", *serverName)
 	}
 
 	if !strings.HasPrefix(r.URL.Path, "/") {
@@ -104,7 +105,7 @@ func authHander(w http.ResponseWriter, r *http.Request, handler func(http.Respon
 		token := r.Header.Get("byfs-auth")
 		version := r.Header.Get("byfs-version")
 
-		if version != '1' {
+		if version != "1" {
 			http.Error(w, "Version Not Support", http.StatusPreconditionFailed)
 			return
 		}
@@ -168,14 +169,14 @@ func saveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err = os.openFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
+	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
 	if err != nil {
 		fmt.Fprintln(w, "Open File Error", err)
 		log.Println("Notice", "Open File Error", err, r.URL.Path, r.RemoteAddr)
 		return
 	}
 
-	_, err = io.Copy(f, w)
+	_, err = io.Copy(w, f)
 
 	err2 := f.Close()
 	if err2 != nil {
@@ -187,7 +188,7 @@ func saveFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = os.Remove(m.file)
+	err = os.Remove(name)
 	if err != nil {
 		panic(err)
 	}
@@ -201,7 +202,7 @@ func deleteFile(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 
-	force := r.Header().Get("byfs-force")
+	force := r.Header.Get("byfs-force")
 	if force == "1" {
 		err = os.RemoveAll(file)
 	} else {
@@ -226,8 +227,8 @@ func postStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header.Set("Connection", "Upgrade")
-	w.Header.Set("Upgrade", "byfs-stream")
+	w.Header().Set("Connection", "Upgrade")
+	w.Header().Set("Upgrade", "byfs-stream")
 
 }
 
