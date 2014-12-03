@@ -117,6 +117,7 @@ class Byfs
 
 		$headers = array();
 		$headers[] = "byfs: 1";
+		$headers[] = "Connection: close";
 		if ($method != 'GET') {
 			$headers[] = "Content-Type: application/octet-stream";
 			if (self::$auth) {
@@ -140,7 +141,7 @@ class Byfs
 
 		$url = 'http://'.self::$server.":".self::$port.'/'. $file;
 
-		return fopen($url, 'r', false, $ctx);
+		return fopen($url, 'rb', false, $ctx);
 	}
 
 
