@@ -7,7 +7,7 @@ import (
 	"os"
 	"log"
 	"path"
-	//"path/filepath"
+	"path/filepath"
 	"strings"
 	"os/signal"
 	"net/http"
@@ -57,7 +57,7 @@ func initFilesystem() {
 }
 
 func pathToFile(p string) string {
-	return path.Clean(*dirroot + "/" + p)
+	return filepath.Join(*dirroot, filepath.FromSlash(path.Clean("/" + p)))
 }
 
 func httpServer() {
@@ -136,8 +136,13 @@ func authHander(w http.ResponseWriter, r *http.Request, handler func(http.Respon
 }
 
 func sendFile(w http.ResponseWriter, r *http.Request) {
-	file := pathToFile(r.URL.Path)
-	f, err := os.Open(file)
+	name := pathToFile(r.URL.Path)
+	if name == "." {
+		fmt.Fprint(w, "File Name Error")
+		return
+	}
+
+	f, err := os.Open(name)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -160,12 +165,16 @@ func sendFile(w http.ResponseWriter, r *http.Request) {
 
 func saveFile(w http.ResponseWriter, r *http.Request) {
 	name := pathToFile(r.URL.Path)
+	if name == "." {
+		fmt.Fprint(w, "File Name Error")
+		return
+	}
 
 	dir, _ := path.Split(name)
 	if dir != "" {
 		err := os.MkdirAll(dir, fileMode)
 		if err != nil {
-			fmt.Fprintln(w, "Mkdir Error", err)
+			fmt.Fprint(w, "Mkdir Error", err)
 			log.Println("[Notice]", "Mkdir Error", err, r.URL.Path, r.RemoteAddr)
 			return
 		}
@@ -173,13 +182,12 @@ func saveFile(w http.ResponseWriter, r *http.Request) {
 
 	f, err := os.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
 	if err != nil {
-		fmt.Fprintln(w, "Open File Error", err)
+		fmt.Fprint(w, "Open File Error", err)
 		log.Println("[Notice]", "Open File Error", err, r.URL.Path, r.RemoteAddr)
 		return
 	}
 
-	i, err := io.Copy(f, r.Body)
-	log.Println(i, err)
+	_, err = io.Copy(f, r.Body)
 
 	err2 := f.Close()
 	if err2 != nil {
@@ -187,7 +195,7 @@ func saveFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err == nil {
-		fmt.Fprintln(w, "Success")
+		fmt.Fprint(w, "Success")
 		return
 	}
 
@@ -196,21 +204,25 @@ func saveFile(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 
-	fmt.Fprintln(w, "Save Data Error", err)
+	fmt.Fprint(w, "Save Data Error", err)
 	log.Println("[Notice]", "Copy Error", err, r.URL.Path, r.RemoteAddr)
 }
 
 func deleteFile(w http.ResponseWriter, r *http.Request) {
-	file := pathToFile(r.URL.Path)
+	name := pathToFile(r.URL.Path)
+	if name == "." {
+		fmt.Fprint(w, "File Name Error")
+		return
+	}
 
-	err := os.Remove(file)
+	err := os.Remove(name)
 	if err != nil {
-		fmt.Fprintln(w, "Delete", r.URL.Path, "Fail", err)
+		fmt.Fprint(w, "Delete", r.URL.Path, "Fail", err)
 		log.Println("[Notice]", "Delete Fail", err, r.URL.Path, r.RemoteAddr)
 		return
 	}
 
-	fmt.Fprintln(w, "Success", err)
+	fmt.Fprint(w, "Success")
 }
 
 func postStream(w http.ResponseWriter, r *http.Request) {

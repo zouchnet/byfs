@@ -62,19 +62,19 @@ class Byfs
 	/**
 	 * 删除远程文件
 	 */
-	static public function delete($path)
+	static public function delete($file)
 	{
-		$fp = self::_open($path, 'DELETE');
+		$fp = self::_open($file, 'DELETE');
 		if (!$fp) { return false; }
 
-		$ok = stream_get_contents($fp, 1024*4);
+		$ok = stream_get_contents($fp, 4096);
 		fclose($fp);
 		
 		if ($ok == 'Success') {
 			return true;
 		}
 
-		trigger_error("DELETE /{$file} Fail {$ok}");
+		trigger_error("DELETE {$file} Fail {$ok}");
 
 		return false;
 	}
@@ -135,7 +135,7 @@ class Byfs
 
 		$headers = array();
 		$headers[] = "byfs-version: 1";
-		$headers[] = "connection: close";
+		$headers[] = "Connection: close";
 		if ($method == 'DELETE') {
 			if (self::$auth) {
 				$salt = dechex(mt_rand(0, 100000000));
@@ -148,7 +148,7 @@ class Byfs
 			'http' => array(
 				'method' => $method,
 				'header' => implode("\r\n", $headers),
-				'protocol_version' => version_compare(php_version, '5.3.0', '>=') ? 1.1 : 1.0,
+				'protocol_version' => version_compare(PHP_VERSION, '5.3.0', '>=') ? 1.1 : 1.0,
 				'timeout' => self::$timeout,
 				'ignore_errors' => true,
 			),
@@ -161,7 +161,7 @@ class Byfs
 		$fp = fopen($url, 'rb', false, $ctx);
 		if (!$fp) { return false; }
 
-		$meta = stream_get_meta_data($src);
+		$meta = stream_get_meta_data($fp);
 
 		$code = isset($meta['wrapper_data'][0]) ? $meta['wrapper_data'][0] : null;
 
@@ -183,41 +183,49 @@ class Byfs
 			return false;
 		}
 
-		$file = substr($file, strlen('byfs://'));
+		$path = substr($file, strlen('byfs://'));
 
 		$req = array();
-		$req[] = "PUT /{$file} HTTP/1.0";
+		$req[] = "PUT /{$path} HTTP/1.0";
+		$req[] = "Connection: close";
 		$req[] = "byfs-version: 1";
-		$req[] = "content-type: application/octet-stream";
+		$req[] = "Transfer-Encoding: chunked";
+		$req[] = "Content-Type: application/octet-stream";
 		if (self::$auth) {
 			$salt = dechex(mt_rand(0, 100000000));
-			$auth = md5(self::$auth . $file . $salt);
+			$auth = md5(self::$auth . $path . $salt);
 			$req[] = "auth: {$auth}{$salt}";
 		}
 		//head空行
 		$req[] = "\r\n";
+		$req = implode("\r\n", $req);
 
 		$dst = fsockopen(self::$server, self::$port, $errno, $error, self::$timeout);
 		if (!$dst) { return false; }
 
-		$ok = fwrite($dst, implode("\r\n", $req));
-		if ($ok === false) {
-			fclose($dst);
-			return false;
-		}
+		//请求头
+		$ok = self::_write($dst, $req, false);
+		if ($ok == false) { return false; }
 
 		if (is_resource($src)) {
-			stream_copy_to_stream($src, $dst);
-		} else {
-			$ok == fwrite($dst, $src);
-			if ($ok === false) {
-				fclose($dst);
-				return false;
+			while (!feof($src)) {
+				$data = fread($src, 2048);
+				if ($data !== false) {
+					$ok = self::_write($dst, $data);
+					if ($ok == false) { return false; }
+				}
 			}
+		} else {
+			$ok = self::_write($dst, $src);
+			if ($ok == false) { return false; }
 		}
 
+		//http结尾空行
+		$ok = self::_write($dst, "");
+		if ($ok == false) { return false; }
+
 		//正常情况下服务器不会反回太长的数据
-		$ok = stream_get_contents($dst, 1024*4);
+		$ok = stream_get_contents($dst, 4096);
 		fclose($dst);
 		if ($ok === false) {
 			return false;
@@ -225,17 +233,32 @@ class Byfs
 
 		//过滤掉head,简易处理方式
 		$ok = explode("\r\n", $ok);
-		$msg = trim(array_pop($ok));
+		$msg = array_pop($ok);
 		unset($ok);
 
-		var_dump($msg);
 		if ($msg == "Success") {
 			return true;
 		}
 
-		trigger_error("PUT /{$file} Fail {$msg}");
+		trigger_error("PUT {$file} Fail {$msg}");
 
 		return false;
+	}
+
+	private function _write($fp, $data, $encode=true)
+	{
+		if ($encode) {
+			//http分段格式
+			$len = strlen($data);
+			$data = dechex($len) . "\r\n" . $data . "\r\n";
+		}
+
+		$n = fwrite($fp, $data);
+		if ($n !== strlen($data)) {
+			fclose($fp);
+			return false;
+		}
+		return true;
 	}
 
 }
