@@ -5,6 +5,8 @@
  */
 class ByfsStream
 {
+	const CODE_AUTH = 8888;
+
 	const CODE_FILE_OPEN = 1;
 	const CODE_FILE_READ = 2;
 	const CODE_FILE_WRITE = 3;
@@ -31,33 +33,82 @@ class ByfsStream
 	private $fp;
 	public $errno;
 
-	public function connect($server, $port, $timeout, $auth)
+	public function connect($server, $port, $timeout=300, $auth='')
+	{
+		$req = array();
+		$req[] = "POST / HTTP/1.1";
+		$req[] = "Connection: Upgrade";
+		$req[] = "Upgrade: Byfs-Stream";
+		$req[] = "Byfs-Version: 1";
+		//head空行
+		$req[] = "\r\n";
+		$req = implode("\r\n", $req);
+
+		$fp = fsockopen($server, $port, $errno, $error, $timeout);
+		if (!$fp) { return false; }
+
+		//请求头
+		$ok = fwrite($fp, $req);
+		if ($ok !== strlen($req)) {
+			fclose($fp);
+			return false;
+		}
+
+		$head = array();
+		while (($buf = fgets($fp, 2048)) !== false) {
+			if ($buf == "\r\n") {
+				break;
+			}
+			if (count($head) > 10) {
+				fclose($fp);
+				return false;
+			}
+		}
+
+		if (!$head) {
+			fclose($fp);
+			return false;
+		}
+
+		//http协议升级
+		if ($head[0] != "HTTP/1.1 101 Switching Protocols\r\n") {
+			fclose($fp);
+			return false;
+		}
+
+		if (!in_array("Connection: Upgrade\r\n", $head)) {
+			fclose($fp);
+			return false;
+		}
+
+		if (!in_array("Upgrade: Byfs-Stream\r\n", $head)) {
+			fclose($fp);
+			return false;
+		}
+
+		//认证
+		foreach ($head as $tmp) {
+			if (strpos($tmp, "Byfs-Auth:") === 0) {
+				list($key, $val) = explode(':', $tmp, 2);
+				$stream->write_uint16(ByfsStream::CODE_AUTH);
+				$stream->write_string($this->_makeToken($val, $auth));
+				$ok = $this->read_bool();
+				if (!$ok) {
+					fclose($fp);
+					return false;
+				}
+				break;
+			}
+		}
+
+		$this->fp = $fp;
+		return true;
+	}
+
+	private function _makeToken($file, $auth)
 	{
 		$salt = dechex(mt_rand(0, 100000000));
-		$auth = md5($auth . $file . $salt);
-
-		$heads = array();
-		$heads[] = "Upgrade: byfs";
-		$heads[] = "byfs: 1";
-		$heads[] = "auth: {$auth}{$salt}";
-
-		$opts = array(
-			'http' => array(
-				'method' => 'POST',
-				'header' => implode("\r\n", $heads),
-				'protocol_version' => version_compare(PHP_VERSION, '5.3.0', '>=') ? 1.1 : 1.0,
-				'timeout' => $timeout,
-				'ignore_errors' => true,
-			),
-		);
-
-		$ctx = stream_context_create($opts);
-
-		$url = 'http://'.$server.":".$port.'/stream';
-
-		$this->fp = fopen($file, 'r+b', false, $ctx);
-
-		return $this->fp ? true : false;
+		return md5($auth . $file . $salt) . $salt;
 	}
 
 	public function __destruct()

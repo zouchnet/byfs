@@ -126,21 +126,15 @@ class Byfs
 	 */
 	static private function _open($file, $method)
 	{
-		if (strpos($file, 'byfs://') !== 0) {
-			trigger_error('file protocol not support!', e_user_error);
-			return false;
-		}
-
-		$file = substr($file, strlen('byfs://'));
+		$file = self::_parseFile($file);
+		if (!$file) { return false; }
 
 		$headers = array();
-		$headers[] = "byfs-version: 1";
+		$headers[] = "Byfs-Version: 1";
 		$headers[] = "Connection: close";
 		if ($method == 'DELETE') {
 			if (self::$auth) {
-				$salt = dechex(mt_rand(0, 100000000));
-				$auth = md5(self::$auth . $file . $salt);
-				$headers[] = "auth: {$auth}{$salt}";
+				$headers[] = self::_makeToken($file);
 			}
 		}
 
@@ -178,23 +172,17 @@ class Byfs
 	 */
 	static private function _put($src, $file)
 	{
-		if (strpos($file, 'byfs://') !== 0) {
-			trigger_error('file protocol not support!', e_user_error);
-			return false;
-		}
-
-		$path = substr($file, strlen('byfs://'));
+		$file = self::_parseFile($file);
+		if (!$file) { return false; }
 
 		$req = array();
-		$req[] = "PUT /{$path} HTTP/1.0";
+		$req[] = "PUT /{$file} HTTP/1.1";
 		$req[] = "Connection: close";
-		$req[] = "byfs-version: 1";
+		$req[] = "Byfs-Version: 1";
 		$req[] = "Transfer-Encoding: chunked";
 		$req[] = "Content-Type: application/octet-stream";
 		if (self::$auth) {
-			$salt = dechex(mt_rand(0, 100000000));
-			$auth = md5(self::$auth . $path . $salt);
-			$req[] = "auth: {$auth}{$salt}";
+			$req[] = self::_makeToken($file);
 		}
 		//head空行
 		$req[] = "\r\n";
@@ -245,7 +233,7 @@ class Byfs
 		return false;
 	}
 
-	private function _write($fp, $data, $encode=true)
+	static private function _write($fp, $data, $encode=true)
 	{
 		if ($encode) {
 			//http分段格式
@@ -259,6 +247,23 @@ class Byfs
 			return false;
 		}
 		return true;
+	}
+
+	static private function _parseFile($file)
+	{
+		if (strpos($file, 'byfs://') !== 0) {
+			trigger_error('File Protocol Not Support!', E_USER_ERROR);
+			return false;
+		}
+
+		return substr($file, strlen('byfs://'));
+	}
+
+	static private function _makeToken($file)
+	{
+		$salt = dechex(mt_rand(0, 100000000));
+		$auth = md5(self::$auth . '/' . $file . $salt);
+		return "Auth: {$auth}{$salt}";
 	}
 
 }

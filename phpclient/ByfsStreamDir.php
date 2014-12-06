@@ -41,6 +41,7 @@ class ByfsStreamDir
 		if ($this->hd) {
 			$this->stream->write_uint16(ByfsStream::CODE_DIR_CLOSE);
 			$this->stream->write_uint32($this->hd);
+			$this->hd = null;
 			return $this->stream->read_bool();
 		}
 	}

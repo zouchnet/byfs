@@ -12,6 +12,14 @@ class ByfsFileSystem
 
 	static private $stream;
 
+	static public function init($server, $port, $timeout, $auth)
+	{
+		self::$server = $server;
+		self::$port = $port;
+		self::$timeout = $timeout;
+		self::$auth = $auth;
+	}
+
 	static public function connect()
 	{
 		if (!self::$stream) {
