@@ -90,8 +90,24 @@ class ByfsStreamFile
 		if (!$ok) {
 			return false;
 		}
-		$this->eof = $this->stream->read_uint8();
-		return $this->stream->read_string();
+
+		$data = "";
+
+		do {
+			$tmp = $this->read_string();
+			$data .= $tmp;
+		} while ($tmp == "");
+
+		$ok = $this->stream->read_bool();
+		if (!$ok) {
+			return false;
+		}
+
+		if (strlen($data) < $count) {
+			$this->eof = true;
+		}
+
+		return $data;
     }
 
     public function write($data)
@@ -99,15 +115,24 @@ class ByfsStreamFile
 		$this->offset = null;
 		$this->stream->write_uint16(ByfsStream::CODE_FILE_WRITE);
 		$this->stream->write_uint32($this->fp);
-		$this->stream->write_string($data);
+
+		$len = strlen($data);
+
+		$data = str_split($data, 4096);
+		foreach ($data as $tmp) {
+			$this->stream->write_string($tmp);
+		}
+		$this->stream->write_uint16(0);
+
 		$ok = $this->stream->read_bool();
 		if (!$ok) { return false; }
-		return $this->stream->read_uint64();
+
+		return $len;
     }
 
 	public function eof()
     {
-		return $this->eof != 0 ? true : false;
+		return $this->eof;
     }
 
 	public function flush()
@@ -162,6 +187,7 @@ class ByfsStreamFile
 			return -1;
 		}
 		$this->offset = $this->stream->read_uint64();
+		$this->eof = false;
 		return 0;
     }
 

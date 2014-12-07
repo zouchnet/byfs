@@ -154,20 +154,12 @@ func deleteFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func postStream(w http.ResponseWriter, r *http.Request) {
-	f := fconn{}
-	ok := f.init(w,r)
+	f, ok := fconnInit(w, r, *password)
 	if !ok {
 		return
 	}
 
-	//认证
-	if *password != "" {
-		ok := f.auth()
-		if !ok {
-			return
-		}
-	}
-
 	defer f.close()
+
 	f.run()
 }

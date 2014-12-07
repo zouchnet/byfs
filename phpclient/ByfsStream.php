@@ -156,14 +156,14 @@ class ByfsStream
 
 	public function read_string()
 	{
-		$num = $this->read_uint32();
+		$num = $this->read_uint16();
 
 		return $this->_read($num);
 	}
 
 	public function write_string($data)
 	{
-		$this->write_uint32(strlen($data));
+		$this->write_uint16(strlen($data));
 
 		return $this->_write($data);
 	}
@@ -280,7 +280,11 @@ class ByfsStream
 
 	private function _read($len)
 	{
-		$data = fread($this->fp, 1);
+		if ($len == 0) {
+			return '';
+		}
+
+		$data = fread($this->fp, $len);
 
 		if ($data === false) {
 			throw new Exception('Stream Read Error!');
