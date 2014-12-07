@@ -30,8 +30,18 @@ class ByfsStream
 	const CODE_STAT = 2005;
 	const CODE_LSTAT = 2006;
 
+	const O_RDONLY = 0x0;
+	const O_WRONLY = 0x1;
+	const O_RDWR = 0x2;
+	const O_APPEND = 0x400;
+	const O_CREATE = 0x40;
+	const O_EXCL = 0x80;
+	const O_SYNC = 0x101000;
+	const O_TRUNC = 0x200;
+
 	private $fp;
 	public $errno;
+	public $error;
 
 	public function connect($server, $port, $timeout=300, $auth='')
 	{
@@ -124,6 +134,7 @@ class ByfsStream
 
 		if ($num != 0) {
 			$this->errno = $num;
+			$this->error = $this->read_string()
 			return false;
 		}
 
@@ -158,37 +169,88 @@ class ByfsStream
 	}
 
 	###### 数字读取 #######
+	#
+	public function read_int8()
+	{
+		$number = $this->read_uint8();
+		return ($number > 127) ? ((-(127 - $number)) - 127 -2) : $number;
+	}
+
+	public function read_int16()
+	{
+		$number = $this->read_uint16();
+		return ($number > 32767) ? ((-(32767 - $number)) - 32767 -2) : $number;
+	}
+
+	public function read_int32()
+	{
+		$number = $this->read_uint32();
+		if (PHP_INT_MAX > 2147483647) {
+			return ($number > 2147483647) ? ((-(2147483647 - $number)) - 2147483647 -2) : $number;
+		}
+		return $number;
+	}
+
+	public function read_int64()
+	{
+		$data = $this->_read(8);
+		//php5.6才支持pack64位
+		return $this->unpackInt64($data);
+	}
+
+	//-------------
 
 	public function read_uint8()
 	{
 		$data = $this->_read(1);
 		$arr = unpack('C', $data);
-		return $arr[0];
+		return $arr[1];
 	}
 
 	public function read_uint16()
 	{
 		$data = $this->_read(2);
 		$arr = unpack('n', $data);
-		return $arr[0];
+		return $arr[1];
 	}
 
+	//32位上会变成有符号
 	public function read_uint32()
 	{
 		$data = $this->_read(4);
 		$arr = unpack('N', $data);
-		return $arr[0];
+		return $arr[1];
 	}
 
+	//php无法支持int64
 	public function read_uint64()
 	{
-		$data = $this->_read(8);
-		$arr = unpack('J', $data);
-		return $arr[0];
+		return $this->read_int64();
 	}
 
 	###### 数字写入 #######
+	public function write_int8($number)
+	{
+		return $this->write_uint8($number);
+	}
 
+	public function write_int16($number)
+	{
+		return $this->write_uint16($number);
+	}
+
+	public function write_int32($number)
+	{
+		return $this->write_uint32($number);
+	}
+
+	public function write_int64($number)
+	{
+		return $this->write_uint64($number);
+	}
+
+	//------------
+	
 	public function write_uint8($number)
 	{
 		$data = unpack('C', $number);
@@ -209,7 +271,8 @@ class ByfsStream
 	
 	public function write_uint64($number)
 	{
-		$data = unpack('J', $number);
+		//php5.6才支持pack64位
+		$data = $this->packInt64($number);
 		return $this->_write($data);
 	}
 
@@ -235,6 +298,23 @@ class ByfsStream
 		}
 
 		return $num;
+	}
+
+	private function packInt64($in)
+	{
+		$in = decbin($in);
+		$in = str_pad($in, 64, '0', STR_PAD_LEFT);
+		$out = '';
+		for ($i = 0, $len = strlen($in); $i < $len; $i += 8) {
+			$out .= chr(bindec(substr($in,$i,8)));
+		}
+		return $out;
+	}
+
+	private function unpackInt64($data)
+	{
+		$return = unpack('Nb/Na', $data);
+		return $return['a'] + ($return['b'] << 32);
 	}
 
 }

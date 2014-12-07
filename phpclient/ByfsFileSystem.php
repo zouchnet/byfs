@@ -44,8 +44,8 @@ class ByfsFileSystem
 
 		$stream->write_uint16(ByfsStream::CODE_MKDIR);
 		$stream->write_string($path);
-		$stream->write_uInt16($mode);
-		$stream->write_uInt8($recursive);
+		$stream->write_uInt32($mode);
+		$stream->write_uInt8($recursive ? 1 : 0);
 
 		return $stream->read_bool();
 	}
@@ -89,7 +89,31 @@ class ByfsFileSystem
 		$stream->write_uint16(ByfsStream::CODE_STAT);
 		$stream->write_string($path);
 
-		return $stream->read_string();
+		$ok = $this->stream->read_bool();
+		if (!$ok) {
+			return false;
+		}
+		$mode = $this->stream->read_uint32();
+		$size = $this->stream->read_int64();
+		$modTime = $this->stream->read_int64();
+
+		$data = array(
+			'dev' => 0,
+			'ino' => 0
+			'mode' => $mode,
+			'nlink' => 0,
+			'uid' => 0,
+			'gid' => 0,
+			'rdev' => 0,
+			'size' => $size,
+			'atime' => 0,
+			'mtime' => $modTime,
+			'ctime' => 0,
+			'blksize' => 0,
+			'blocks' => 0,
+		);
+
+		return $data;
 	}
 
 	static public function lstat($path)
@@ -99,7 +123,31 @@ class ByfsFileSystem
 		$stream->write_uint16(ByfsStream::CODE_LSTAT);
 		$stream->write_string($path);
 
-		return $stream->read_string();
+		$ok = $this->stream->read_bool();
+		if (!$ok) {
+			return false;
+		}
+		$mode = $this->stream->read_uint32();
+		$size = $this->stream->read_int64();
+		$modTime = $this->stream->read_int64();
+
+		$data = array(
+			'dev' => 0,
+			'ino' => 0
+			'mode' => $mode,
+			'nlink' => 0,
+			'uid' => 0,
+			'gid' => 0,
+			'rdev' => 0,
+			'size' => $size,
+			'atime' => 0,
+			'mtime' => $modTime,
+			'ctime' => 0,
+			'blksize' => 0,
+			'blocks' => 0,
+		);
+
+		return $data;
 	}
    
     static public function fopen($path, $mode, $options, $opened_path)

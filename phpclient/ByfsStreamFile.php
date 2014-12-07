@@ -8,6 +8,7 @@ class ByfsStreamFile
 	private $stream;
 	private $fp;
 	private $offset;
+	private $eof;
 
 	public function __construct(ByfsStream $stream)
 	{
@@ -16,20 +17,65 @@ class ByfsStreamFile
 
     public function open($path, $mode)
     {
+		$mode = trim(trim($mode), 'b');
+
+		$flag = 0;
+		switch ($mode) {
+		case 'r' :
+			$flag = ByfsStream::O_RDONLY;
+		case 'r+' :
+			$flag = ByfsStream::O_RDWR;
+		case 'w' :
+			$flag = ByfsStream::O_WRONLY | ByfsStream::O_TRUNC | ByfsStream::O_CREATE;
+		case 'w+' :
+			$flag = ByfsStream::O_RDWR | ByfsStream::O_TRUNC | ByfsStream::O_CREATE;
+		case 'a' :
+			$flag = ByfsStream::O_APPEND | ByfsStream::O_CREATE;
+		case 'a+' :
+			$flag = ByfsStream::O_RDWR | ByfsStream::O_CREATE;
+		case 'x' :
+			$flag = ByfsStream::O_WRONLY | ByfsStream::O_CREATE | ByfsStream::O_EXCL;
+		case 'x+' :
+			$flag = ByfsStream::O_RDWR | ByfsStream::O_CREATE | ByfsStream::O_EXCL;
+		case 'c' :
+			$flag = ByfsStream::O_WRONLY | ByfsStream::O_CREATE;
+		case 'c+' :
+			$flag = ByfsStream::O_RDWR | ByfsStream::O_CREATE;
+		default:
+			throw new Exception("未识别的文件打开模式:{$mode}");
+		}
+
 		$this->stream->write_uint16(ByfsStream::CODE_FILE_OPEN);
 		$this->stream->write_string($path);
-		$this->stream->write_uInt16($mode);
+		$this->stream->write_int32($flag);
+
+		$ok = $this->stream->read_bool();
+		if (!$ok) {
+			return false;
+		}
 
 		$this->fp = $this->stream->read_uint32();
+
+		if ($this->fp) {
+			if ($mode == 'a+') {
+				$this->seek(SEEK_END,0)
+			}
+		}
 
 		return $this->fp != 0 ? true : false;
     }
 
 	public function __destruct()
 	{
+		$this->close();
+	}
+	
+	public function close()
+	{
 		if ($this->fp) {
 			$this->stream->write_uint16(ByfsStream::CODE_FILE_CLOSE);
 			$this->stream->write_uint32($this->fp);
+			$this->fp = null;
 			return $this->stream->read_bool();
 		}
 	}
@@ -41,7 +87,11 @@ class ByfsStreamFile
 		$this->stream->write_uint32($this->fp);
 		$this->stream->write_uint32($count);
 		$ok = $this->stream->read_bool();
-		return !$ok ? false : $this->stream->read_string();
+		if (!$ok) {
+			return false;
+		}
+		$this->eof = $this->stream->read_uint8();
+		return $this->stream->read_string();
     }
 
     public function write($data)
@@ -57,9 +107,7 @@ class ByfsStreamFile
 
 	public function eof()
     {
-		$this->stream->write_uint16(ByfsStream::CODE_FILE_EOF);
-		$this->stream->write_uint32($this->fp);
-		return $this->stream->read_bool();
+		return $this->eof != 0 ? true : false;
     }
 
 	public function flush()
@@ -106,7 +154,7 @@ class ByfsStreamFile
 
 		$this->stream->write_uint16(ByfsStream::CODE_FILE_SEEK);
 		$this->stream->write_uint32($this->fp);
-		$this->stream->write_uint64($offset);
+		$this->stream->write_int64($offset);
 		$this->stream->write_uint8($mode);
 		$ok = $this->stream->read_bool();
 		if (!$ok) {
@@ -130,9 +178,13 @@ class ByfsStreamFile
 	{
 		$this->stream->write_uint16(ByfsStream::CODE_FILE_STAT);
 		$this->stream->write_uint32($this->fp);
+		$ok = $this->stream->read_bool();
+		if (!$ok) {
+			return false;
+		}
 		$mode = $this->stream->read_uint32();
-		$size = $this->stream->read_uint64();
-		$modTime = $this->stream->read_uint64();
+		$size = $this->stream->read_int64();
+		$modTime = $this->stream->read_int64();
 
 		$data = array(
 			'dev' => 0,

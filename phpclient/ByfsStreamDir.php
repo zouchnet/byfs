@@ -22,11 +22,16 @@ class ByfsStreamDir
 		$this->stream->write_uint16(ByfsStream::CODE_DIR_OPEN);
 		$this->stream->write_string($path);
 
+		$ok = $this->stream->read_bool();
+		if (!$ok) {
+			return false;
+		}
+
 		$this->path = $path;
 		$this->eof = false;
 		$this->hd = $this->stream->read_uint32();
 
-		return $this->hd != 0 ? true : false;
+		return true;
     }
 
 	public function __destruct()
@@ -68,7 +73,12 @@ class ByfsStreamDir
     {
 		$this->stream->write_uint16(ByfsStream::CODE_DIR_READ);
 		$this->stream->write_uint32($this->hd);
-		$this->stream->write_uint32($this->cache_len);
+		$this->stream->write_uint16($this->cache_len);
+		$ok = $this->stream->read_bool();
+		if (!$ok) {
+			$this->eof = true;
+			return
+		}
 		$this->dirs = $this->stream->read_array_string();
 
 		if (count($this->dirs) < $this->cache_len) {

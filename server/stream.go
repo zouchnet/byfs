@@ -11,15 +11,48 @@ import (
 	"encoding/binary"
 )
 
+const (
+	CODE_AUTH = 8888
+
+	CODE_FILE_OPEN = 1
+	CODE_FILE_READ = 2
+	CODE_FILE_WRITE = 3
+	CODE_FILE_LOCK = 4
+	CODE_FILE_UNLOCK = 5
+	CODE_FILE_SEEK = 6
+	CODE_FILE_STAT = 7
+	CODE_FILE_FLUSH = 8
+	CODE_FILE_TRUCATE = 9
+	CODE_FILE_CLOSE = 10
+
+	CODE_DIR_OPEN = 1001
+	CODE_DIR_READ = 1002
+	CODE_DIR_CLOSE = 1003
+
+	CODE_MKDIR = 2001
+	CODE_RMDIR = 2002
+	CODE_RENAME = 2003
+	CODE_STAT = 2004
+	CODE_LSTAT = 2005
+)
+
+var (
+	//成功
+	status_ok uint8 = 0
+	//失败
+	status_fail uint8 = 1
+)
+
 var actionTimeout = 2 * time.Second
 var idleTimeout = 300 * time.Second
-var maxString uint32 = 1024 * 4
+var maxString uint32 = 1024 * 10
 
 type fconn struct{
 	conn net.Conn
 	bufrw *bufio.ReadWriter
 	files map[uint32]*os.File
 	pos uint32
+	ok bool
 }
 
 func (f *fconn) init(w http.ResponseWriter, r *http.Request) bool {
@@ -102,7 +135,7 @@ func (f *fconn) auth() bool {
 }
 
 func (f *fconn) run() {
-	for {
+	for f.ok {
 		var code uint16
 		//这里是闲置超时
 		f.conn.SetReadDeadline(time.Now().Add(idleTimeout))
@@ -112,59 +145,699 @@ func (f *fconn) run() {
 			return
 		}
 
-		var ok bool
 		switch (code) {
 			case CODE_FILE_OPEN :
-				ok = f.a_fopen()
+				f.a_fopen()
 			case CODE_FILE_READ :
-				ok = f.a_fread()
+				f.a_fread()
 			case CODE_FILE_WRITE :
-				ok = f.a_fwrite()
+				f.a_fwrite()
 			case CODE_FILE_LOCK :
-				ok = f.a_flock()
+				f.a_flock()
 			case CODE_FILE_UNLOCK :
-				ok = f.a_funlock()
+				f.a_funlock()
 			case CODE_FILE_SEEK :
-				ok = f.a_fseek()
+				f.a_fseek()
 			case CODE_FILE_STAT :
-				ok = f.a_fstat()
+				f.a_fstat()
 			case CODE_FILE_EOF :
-				ok = f.a_feof()
+				f.a_feof()
 			case CODE_FILE_FLUSH :
-				ok = f.a_flush()
+				f.a_flush()
 			case CODE_FILE_TRUCATE :
-				ok = f.a_ftrucate()
+				f.a_ftrucate()
 			case CODE_FILE_CLOSE :
-				ok = f.a_fclose()
+				f.a_fclose()
 
 			case CODE_DIR_OPEN :
-				ok = f.a_opendir()
+				f.a_opendir()
 			case CODE_DIR_READ :
-				ok = f.a_readdir()
+				f.a_readdir()
 			case CODE_DIR_CLOSE :
-				ok = f.a_closedir()
+				f.a_closedir()
 
 			case CODE_MKDIR :
-				ok = f.a_mkdir()
+				f.a_mkdir()
 			case CODE_RMDIR :
-				ok = f.a_rmdir()
-			case CODE_COPY :
-				ok = f.a_copy()
-			case CODE_MOVE :
-				ok = f.a_move()
+				f.a_rmdir()
+			case CODE_RENAME :
+				f.a_rename()
 			case CODE_STAT :
-				ok = f.a_stat()
+				f.a_stat()
 			case CODE_LSTAT :
-				ok = f.a_lstat()
+				f.a_lstat()
 			default:
-				ok = false
-		}
-
-		if !ok {
-			return
+				false
 		}
 	}
 }
+
+func (f *fconn) a_fopen() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	name, err := f.readString()
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	var flag int32
+	err := binary.Read(f.bufrw, binary.BigEndian, flag)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fp, err := fs.openFile(name, flag)
+	if err != nil {
+		f.writeError(err)
+		return
+	}
+
+	f.pos++
+	f.files[f.pos] = fp
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	binary.Write(f.bufrw, binary.BigEndian, f.pos)
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_fread() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	var pos uint32
+	err := binary.Read(f.bufrw, binary.BigEndian, pos)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	var count uint32
+	err := binary.Read(f.bufrw, binary.BigEndian, count)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fp := f.files[pos]
+	if fp == nil {
+		f.writeError("文件描术符错误")
+		return
+	}
+
+	var eof uint8
+
+	data := make([]byte, count)
+	_, err = fp.Read(data)
+	if err != nil {
+		if err == io.EOF {
+			eof = 1
+		} else {
+			f.writeError(err)
+			return
+		}
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	binary.Write(f.bufrw, binary.BigEndian, eof)
+	f.bufrw.Write(data)
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_fwrite() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	var pos uint32
+	err := binary.Read(f.bufrw, binary.BigEndian, pos)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	data, err := f.readData()
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fp := f.files[pos]
+	if fp == nil {
+		f.writeError("文件描术符错误")
+		return
+	}
+
+	_, err = fp.Write(data)
+
+	if err != nil {
+		f.writeError(err)
+		return
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_flock() {
+}
+
+func (f *fconn) a_funlock() {
+}
+
+func (f *fconn) a_flush() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	var pos uint32
+	err := binary.Read(f.bufrw, binary.BigEndian, pos)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fp := f.files[pos]
+	if fp == nil {
+		f.writeError("文件描术符错误")
+		return
+	}
+
+	err = fp.Sync()
+	if err != nil {
+		f.writeError(err)
+		return
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_fseek() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	var pos uint32
+	err := binary.Read(f.bufrw, binary.BigEndian, pos)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	var offset int64
+	err := binary.Read(f.bufrw, binary.BigEndian, offset)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	var mode uint8
+	err := binary.Read(f.bufrw, binary.BigEndian, mode)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fp := f.files[pos]
+	if fp == nil {
+		f.writeError("文件描术符错误")
+		return
+	}
+
+	var off int64
+
+	switch int(mode) {
+	case os.SEEK_SET:
+		off, err = fp.Seek(offset, os.SEEK_SET)
+	case os.SEEK_CUR:
+		off, err = fp.Seek(offset, os.SEEK_CUR)
+	case os.SEEK_END:
+		off, err = fp.Seek(offset, os.SEEK_END)
+	default:
+		f.writeError("seek模式错误")
+		return
+	}
+
+	if err != nil {
+		f.writeError(err)
+		return
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	binary.Write(f.bufrw, binary.BigEndian, off)
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_fstat() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	var pos uint32
+	err := binary.Read(f.bufrw, binary.BigEndian, pos)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fp := f.files[pos]
+	if fp == nil {
+		f.writeError("文件描术符错误")
+		return
+	}
+
+	fi, err := f.Stat()
+	if fp == nil {
+		f.writeError(err)
+		return
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	binary.Write(f.bufrw, binary.BigEndian, fi.Mode())
+	binary.Write(f.bufrw, binary.BigEndian, fi.Size())
+	binary.Write(f.bufrw, binary.BigEndian, fi.ModTime().Unix())
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_ftrucate() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	var pos uint32
+	err := binary.Read(f.bufrw, binary.BigEndian, pos)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	var size int64
+	err := binary.Read(f.bufrw, binary.BigEndian, size)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fp := f.files[pos]
+	if fp == nil {
+		f.writeError("文件描术符错误")
+		return
+	}
+
+	err = fp.Truncate(size)
+	if err != nil {
+		f.writeError(err)
+		return
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+
+func (f *fconn) a_fclose() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	var pos uint32
+	err := binary.Read(f.bufrw, binary.BigEndian, pos)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fp := f.files[pos]
+	if fp == nil {
+		f.writeError("文件描术符错误")
+		return
+	}
+
+	fi, err := fp.Close()
+	if err == nil {
+		f.writeError(err)
+		return
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_opendir() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	name, err := f.readString()
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fp, err := fs.open(name)
+	if err != nil {
+		f.writeError(err)
+		return
+	}
+
+	f.pos++
+	f.files[f.pos] = fp
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	binary.Write(f.bufrw, binary.BigEndian, f.pos)
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_readdir() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	var pos uint32
+	err := binary.Read(f.bufrw, binary.BigEndian, pos)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	var count uint16
+	err := binary.Read(f.bufrw, binary.BigEndian, count)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fp := f.files[pos]
+	if fp == nil {
+		f.writeError("文件描术符错误")
+		return
+	}
+
+	fi, err = fp.Readdir(int(count))
+	if err != nil {
+		f.writeError(err)
+		return
+	}
+
+	var num uint16 = len(fi)
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	binary.Write(f.bufrw, binary.BigEndian, num)
+	for _, val := range fi {
+		f.writeString(val.Name())
+	}
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_closedir() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	var pos uint32
+	err := binary.Read(f.bufrw, binary.BigEndian, pos)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fp := f.files[pos]
+	if fp == nil {
+		f.writeError("文件描术符错误")
+		return
+	}
+
+	fi, err := fp.Close()
+	if err == nil {
+		f.writeError(err)
+		return
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_mkdir() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	name, err := f.readString()
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	var mode uint32
+	err := binary.Read(f.bufrw, binary.BigEndian, pos)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	var rec uint8
+	err := binary.Read(f.bufrw, binary.BigEndian, rec)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	if rec == 0 {
+		err = os.Mkdir(name, mode)
+	} else {
+		err = os.MkdirALL(name, mode)
+	}
+
+	if err != nil {
+		f.writeError(err)
+		return
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_rmdir() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	name, err := f.readString()
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	var rec uint8
+	err := binary.Read(f.bufrw, binary.BigEndian, rec)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	if rec == 0 {
+		err = os.Remove(name)
+	} else {
+		err = os.RemoveAll(name)
+	}
+
+	if err != nil {
+		f.writeError(err)
+		return
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_rename() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	name, err := f.readString()
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	to, err := f.readString()
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	err = os.Rename(name, to)
+
+	if err != nil {
+		f.writeError(err)
+		return
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_stat() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	name, err := f.readString()
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fi, err := fs.Stat(name)
+	if err != nil {
+		f.writeError(err)
+		return
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	binary.Write(f.bufrw, binary.BigEndian, fi.Mode())
+	binary.Write(f.bufrw, binary.BigEndian, fi.Size())
+	binary.Write(f.bufrw, binary.BigEndian, fi.ModTime().Unix())
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
+func (f *fconn) a_lstat() {
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
+
+	name, err := f.readString()
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+
+	fi, err := fs.Lstat(name)
+	if err != nil {
+		f.writeError(err)
+		return
+	}
+
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
+	binary.Write(f.bufrw, binary.BigEndian, status_ok)
+	binary.Write(f.bufrw, binary.BigEndian, fi.Mode())
+	binary.Write(f.bufrw, binary.BigEndian, fi.Size())
+	binary.Write(f.bufrw, binary.BigEndian, fi.ModTime().Unix())
+	err = f.bufrw.Flush()
+
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
+}
+
 
 func (f *fconn) readString() (string, error) {
 	var strlen uint32
@@ -188,6 +861,28 @@ func (f *fconn) readString() (string, error) {
 	return string(data), nil
 }
 
+func (f *fconn) readData() ([]byte, error) {
+	var strlen uint32
+
+	f.conn.SetReadDeadline(time.Now().Add(actionTimeout * 10))
+	err := binary.Read(f.bufrw, binary.BigEndian, &strlen)
+	if err != nil {
+		return "", err
+	}
+
+	if strlen > maxString {
+		return "", errors.New("Data Too Big")
+	}
+
+	data := make([]byte, strlen)
+	_, err = f.bufrw.Read(data)
+	if err != nil {
+		return "", err
+	}
+
+	return data, nil
+}
+
 func (f fconn) writeString(str string) error {
 	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
 
@@ -200,83 +895,28 @@ func (f fconn) writeString(str string) error {
 
 	return err
 }
-func (f *fconn) a_fopen() bool {
-	return true
-}
 
-func (f *fconn) a_fread() bool {
-	return true
-}
+func (f fconn) writeError(str ...interface{}) {
+	f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
 
-func (f *fconn) a_fwrite() bool {
-	return true
-}
+	err := binary.Write(f.bufrw, binary.BigEndian, status_fail)
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
 
-func (f *fconn) a_flock() bool {
-	return true
-}
+	_, err = f.bufrw.WriteString(fmt.Sprint(str...))
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
 
-func (f *fconn) a_funlock() bool {
-	return true
+	err = f.bufrw.Flush()
+	if err != nil {
+		log.Println(err)
+		f.ok = false
+		return
+	}
 }
-
-func (f *fconn) a_fseek() bool {
-	return true
-}
-
-func (f *fconn) a_fstat() bool {
-	return true
-}
-
-func (f *fconn) a_feof() bool {
-	return true
-}
-
-func (f *fconn) a_flush() bool {
-	return true
-}
-
-func (f *fconn) a_ftrucate() bool {
-	return true
-}
-
-func (f *fconn) a_fclose() bool {
-	return true
-}
-
-func (f *fconn) a_opendir() bool {
-	return true
-}
-
-func (f *fconn) a_readdir() bool {
-	return true
-}
-
-func (f *fconn) a_closedir() bool {
-	return true
-}
-
-func (f *fconn) a_mkdir() bool {
-	return true
-}
-
-func (f *fconn) a_rmdir() bool {
-	return true
-}
-
-func (f *fconn) a_copy() bool {
-	return true
-}
-
-func (f *fconn) a_move() bool {
-	return true
-}
-
-func (f *fconn) a_stat() bool {
-	return true
-}
-
-func (f *fconn) a_lstat() bool {
-	return true
-}
-
