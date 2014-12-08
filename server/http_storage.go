@@ -159,6 +159,8 @@ func postStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Println("link")
+
 	defer f.close()
 
 	f.run()

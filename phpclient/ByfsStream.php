@@ -6,6 +6,7 @@
 class ByfsStream
 {
 	const CODE_AUTH = 8888;
+	const CODE_CLOSE = 9999;
 
 	const CODE_FILE_OPEN = 1;
 	const CODE_FILE_READ = 2;
@@ -14,10 +15,9 @@ class ByfsStream
 	const CODE_FILE_UNLOCK = 5;
 	const CODE_FILE_SEEK = 6;
 	const CODE_FILE_STAT = 7;
-	const CODE_FILE_EOF = 8;
-	const CODE_FILE_LUSH = 9;
-	const CODE_FILE_TRUCATE = 10;
-	const CODE_FILE_CLOSE = 11;
+	const CODE_FILE_FLUSH = 8;
+	const CODE_FILE_TRUCATE = 9;
+	const CODE_FILE_CLOSE = 10;
 
 	const CODE_DIR_OPEN = 1001;
 	const CODE_DIR_READ = 1002;
@@ -26,9 +26,8 @@ class ByfsStream
 	const CODE_MKDIR = 2001;
 	const CODE_RMDIR = 2002;
 	const CODE_COPY = 2003;
-	const CODE_MOVE = 2004;
-	const CODE_STAT = 2005;
-	const CODE_LSTAT = 2006;
+	const CODE_STAT = 2004;
+	const CODE_LSTAT = 2005;
 
 	const O_RDONLY = 0x0;
 	const O_WRONLY = 0x1;
@@ -69,6 +68,7 @@ class ByfsStream
 			if ($buf == "\r\n") {
 				break;
 			}
+			$head[] = $buf;
 			if (count($head) > 10) {
 				fclose($fp);
 				return false;
@@ -124,6 +124,7 @@ class ByfsStream
 	public function __destruct()
 	{
 		if ($this->fp) {
+			$this->write_uint16(self::CODE_CLOSE);
 			fclose($this->fp);
 		}
 	}
@@ -134,7 +135,7 @@ class ByfsStream
 
 		if ($num != 0) {
 			$this->errno = $num;
-			$this->error = $this->read_string()
+			$this->error = $this->read_string();
 			return false;
 		}
 
@@ -253,19 +254,19 @@ class ByfsStream
 	
 	public function write_uint8($number)
 	{
-		$data = unpack('C', $number);
+		$data = pack('C', $number);
 		return $this->_write($data);
 	}
 
 	public function write_uint16($number)
 	{
-		$data = unpack('n', $number);
+		$data = pack('n', $number);
 		return $this->_write($data);
 	}
 
 	public function write_uint32($number)
 	{
-		$data = unpack('N', $number);
+		$data = pack('N', $number);
 		return $this->_write($data);
 	}
 	
@@ -288,6 +289,10 @@ class ByfsStream
 
 		if ($data === false) {
 			throw new Exception('Stream Read Error!');
+		}
+
+		if ($data == "") {
+			throw new Exception('Stream Read EOF');
 		}
 
 		return $data;

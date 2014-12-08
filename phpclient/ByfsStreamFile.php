@@ -17,30 +17,40 @@ class ByfsStreamFile
 
     public function open($path, $mode)
     {
-		$mode = trim(trim($mode), 'b');
+		$mode = strtolower(trim(trim($mode), 'b'));
 
 		$flag = 0;
 		switch ($mode) {
 		case 'r' :
 			$flag = ByfsStream::O_RDONLY;
+			break;
 		case 'r+' :
 			$flag = ByfsStream::O_RDWR;
+			break;
 		case 'w' :
 			$flag = ByfsStream::O_WRONLY | ByfsStream::O_TRUNC | ByfsStream::O_CREATE;
+			break;
 		case 'w+' :
 			$flag = ByfsStream::O_RDWR | ByfsStream::O_TRUNC | ByfsStream::O_CREATE;
+			break;
 		case 'a' :
 			$flag = ByfsStream::O_APPEND | ByfsStream::O_CREATE;
+			break;
 		case 'a+' :
 			$flag = ByfsStream::O_RDWR | ByfsStream::O_CREATE;
+			break;
 		case 'x' :
 			$flag = ByfsStream::O_WRONLY | ByfsStream::O_CREATE | ByfsStream::O_EXCL;
+			break;
 		case 'x+' :
 			$flag = ByfsStream::O_RDWR | ByfsStream::O_CREATE | ByfsStream::O_EXCL;
+			break;
 		case 'c' :
 			$flag = ByfsStream::O_WRONLY | ByfsStream::O_CREATE;
+			break;
 		case 'c+' :
 			$flag = ByfsStream::O_RDWR | ByfsStream::O_CREATE;
+			break;
 		default:
 			throw new Exception("未识别的文件打开模式:{$mode}");
 		}
@@ -58,7 +68,7 @@ class ByfsStreamFile
 
 		if ($this->fp) {
 			if ($mode == 'a+') {
-				$this->seek(SEEK_END,0)
+				$this->seek(SEEK_END,0);
 			}
 		}
 
@@ -197,7 +207,7 @@ class ByfsStreamFile
 			$this->seek(0, SEEK_CUR);
 		}
 
-		return $this->offset != -1 : $this->offset : false;
+		return $this->offset != -1 ? $this->offset : false;
     }
 
 	public function stat()
@@ -214,7 +224,7 @@ class ByfsStreamFile
 
 		$data = array(
 			'dev' => 0,
-			'ino' => 0
+			'ino' => 0,
 			'mode' => $mode,
 			'nlink' => 0,
 			'uid' => 0,

@@ -38,6 +38,26 @@ class ByfsFileSystem
 		self::$stream = null;
 	}
 
+    static public function fopen($path, $mode, $options=null, $opened_path=null)
+    {
+		$stream = self::connect();
+
+		$file = new ByfsStreamFile($stream);
+		$ok = $file->open($path, $mode);
+
+		return $ok ? $file : false;
+    }
+
+	static public function opendir($path)
+	{
+		$stream = self::connect();
+
+		$file = new ByfsStreamDir($stream);
+		$ok = $file->open($path);
+
+		return $ok ? $file : false;
+	}
+
 	static public function mkdir($path, $mode = 0777, $recursive=false)
 	{
 		$stream = self::connect();
@@ -98,7 +118,7 @@ class ByfsFileSystem
 
 		$data = array(
 			'dev' => 0,
-			'ino' => 0
+			'ino' => 0,
 			'mode' => $mode,
 			'nlink' => 0,
 			'uid' => 0,
@@ -132,7 +152,7 @@ class ByfsFileSystem
 
 		$data = array(
 			'dev' => 0,
-			'ino' => 0
+			'ino' => 0,
 			'mode' => $mode,
 			'nlink' => 0,
 			'uid' => 0,
@@ -147,26 +167,6 @@ class ByfsFileSystem
 		);
 
 		return $data;
-	}
-   
-    static public function fopen($path, $mode, $options, $opened_path)
-    {
-		$stream = self::connect();
-
-		$file = new ByfsStreamFile($stream);
-		$ok = $file->open($path, $mode);
-
-		return $ok ? $file : false;
-    }
-
-	static public function opendir($path)
-	{
-		$stream = self::connect();
-
-		$file = new ByfsStreamDir($stream);
-		$ok = $file->open($path);
-
-		return $ok ? $file : false;
 	}
 
 }

@@ -14,6 +14,7 @@ import (
 
 const (
 	CODE_AUTH = 8888
+	CODE_CLOSE = 9999
 
 	CODE_FILE_OPEN = 1
 	CODE_FILE_READ = 2
@@ -67,7 +68,6 @@ type fconn struct{
 	bufrw *bufio.ReadWriter
 	files map[uint32]*file
 	pos uint32
-	ok bool
 	pass string
 	token string
 }
@@ -117,6 +117,7 @@ func FconnInit(w http.ResponseWriter, r *http.Request, password string) (*fconn,
 	f.bufrw = bufrw
 	f.token = token
 	f.pass = password
+	f.files = make(map[uint32]*file)
 
 	return f, true
 }
@@ -125,6 +126,9 @@ func (f *fconn) close() {
 	for _, fp := range f.files {
 		fp.Close()
 	}
+
+	f.bufrw.Flush()
+	f.conn.Close()
 }
 
 func (f *fconn) auth() {
@@ -146,8 +150,11 @@ func (f *fconn) auth() {
 }
 
 func (f *fconn) run() {
+		log.Println("run")
 	defer func() {
+		log.Println("defer")
 		if x := recover(); x != nil {
+			log.Println(x)
 			switch v := x.(type) {
 			case FatalError :
 				log.Println("[Fatal]", v, f.conn.RemoteAddr())
@@ -159,13 +166,20 @@ func (f *fconn) run() {
 
 	//这里要求马上认证
 	if f.pass != "" {
+		log.Println("auth")
 		f.auth()
 	}
 
-	for f.ok {
+	for {
 		f.idleTimeLimit()
 		code := f.readUint16()
 
+		if code == CODE_CLOSE {
+			log.Println("link CLOSE")
+			return
+		}
+
+		log.Println("code", code)
 		f._run(code)
 	}
 }
@@ -361,6 +375,7 @@ func (f *fconn) a_ftrucate() {
 }
 
 func (f *fconn) a_fclose() {
+	log.Println("fclose")
 	f.readTimeLimit()
 	pos := f.readUint32()
 
