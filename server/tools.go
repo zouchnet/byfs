@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 )
 
-func tokenAuth(str string, token string) bool {
+func tokenAuth(str string, pass string, token string) bool {
 	if len(token) <= 32 {
 		return false
 	}
@@ -16,7 +16,7 @@ func tokenAuth(str string, token string) bool {
 	salt := token[32:]
 
 	h := md5.New()
-	io.WriteString(h, *password)
+	io.WriteString(h, pass)
 	io.WriteString(h, str)
 	io.WriteString(h, salt)
 	_d := h.Sum(nil)

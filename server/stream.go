@@ -6,8 +6,9 @@ import (
 	"time"
 	"log"
 	"bufio"
-	"errors"
 	"os"
+	"fmt"
+	"io"
 	"encoding/binary"
 )
 
@@ -43,37 +44,35 @@ var (
 	status_fail uint8 = 1
 )
 
-var actionTimeout = 2 * time.Second
+var actionTimeout = 3 * time.Second
 var idleTimeout = 300 * time.Second
-var maxString uint32 = 1024 * 10
-
-//速度kbps/秒
-var minTransferSpeed = 5
 
 type FatalError string
 func (e FatalError) Error() string {
-	return e
+	return string(e)
 }
 
 type WarningError string
 func (e WarningError) Error() string {
-	return e
+	return string(e)
 }
 
 type NoticeError string
 func (e NoticeError) Error() string {
-	return e
+	return string(e)
 }
 
 type fconn struct{
 	conn net.Conn
 	bufrw *bufio.ReadWriter
-	files map[uint32]*os.File
+	files map[uint32]*file
 	pos uint32
 	ok bool
+	pass string
+	token string
 }
 
-func fconnInit(w http.ResponseWriter, r *http.Request, password) (*fconn, bool) {
+func FconnInit(w http.ResponseWriter, r *http.Request, password string) (*fconn, bool) {
 	if r.Header.Get("Connection") != "Upgrade" {
 		http.Error(w, "Connection Need Upgrade", http.StatusPreconditionFailed)
 		log.Println("Connection Need Upgrade", r.RemoteAddr)
@@ -91,8 +90,7 @@ func fconnInit(w http.ResponseWriter, r *http.Request, password) (*fconn, bool) 
 		panic("webserver doesn't support hijacking")
     }
 
-	var err error
-	conn, bufrw, err = hj.Hijack()
+	conn, bufrw, err := hj.Hijack()
     if err != nil {
 		panic("hijacking error")
     }
@@ -111,18 +109,14 @@ func fconnInit(w http.ResponseWriter, r *http.Request, password) (*fconn, bool) 
 	err = bufrw.Flush()
 	if err != nil {
 		conn.Close()
-		return false
+		return nil, false
 	}
 
-	ok := f.auth(token)
-	if !ok {
-		conn.Close()
-		return false
-	}
-
-	f = &fconn{}
+	f := &fconn{}
 	f.conn = conn
 	f.bufrw = bufrw
+	f.token = token
+	f.pass = password
 
 	return f, true
 }
@@ -133,37 +127,22 @@ func (f *fconn) close() {
 	}
 }
 
-func (f *fconn) auth(token) bool {
-	var code uint16
-
-	//这里要求马上认证
-	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
-	err := binary.Read(f.bufrw, binary.BigEndian, &code)
-	if err != nil {
-		log.Println("Read Error", err, f.conn.RemoteAddr())
-		return false
-	}
+func (f *fconn) auth() {
+	f.readTimeLimit()
+	code := f.readUint16()
 
 	//协议错误
 	if code != CODE_AUTH {
-		log.Println("Auth Error", f.conn.RemoteAddr())
-		return false
+		panic(FatalError("Auth Code Not Give"))
 	}
 
 	//字符串
-	data, err := f.readString()
-	if err != nil {
-		log.Println("Read Error", err, f.conn.RemoteAddr())
-		return false
-	}
+	data := f.readString()
 
-	ok := tokenAuth(token, data)
+	ok := tokenAuth(f.token, f.pass, data)
 	if !ok {
-		log.Println("Auth Error", f.conn.RemoteAddr())
-		return false
+		panic(FatalError("Auth Error"))
 	}
-
-	return true
 }
 
 func (f *fconn) run() {
@@ -171,12 +150,17 @@ func (f *fconn) run() {
 		if x := recover(); x != nil {
 			switch v := x.(type) {
 			case FatalError :
-				log.Println("[Fatal]", value, f.conn.RemoteAddr())
+				log.Println("[Fatal]", v, f.conn.RemoteAddr())
 			default:
 				panic(x)
 			}
 		}
 	}()
+
+	//这里要求马上认证
+	if f.pass != "" {
+		f.auth()
+	}
 
 	for f.ok {
 		f.idleTimeLimit()
@@ -191,11 +175,11 @@ func (f *fconn) _run(code uint16) {
 		if x := recover(); x != nil {
 			switch v := x.(type) {
 			case NoticeError :
-				log.Println("[Notice]", value)
-				f.writeError("[Notice]", value)
+				log.Println("[Notice]", v)
+				f.writeError("[Notice]", v)
 			case WarningError :
-				log.Println("[Warning]", value)
-				f.writeError("[Warning]", value)
+				log.Println("[Warning]", v)
+				f.writeError("[Warning]", v)
 			default:
 				panic(x)
 			}
@@ -217,8 +201,6 @@ func (f *fconn) _run(code uint16) {
 			f.a_fseek()
 		case CODE_FILE_STAT :
 			f.a_fstat()
-		case CODE_FILE_EOF :
-			f.a_feof()
 		case CODE_FILE_FLUSH :
 			f.a_flush()
 		case CODE_FILE_TRUCATE :
@@ -247,51 +229,50 @@ func (f *fconn) _run(code uint16) {
 			panic(FatalError("未定义的指令"))
 	}
 
-	f.Flush()
+	f.flush()
 }
 
 
 func (f *fconn) a_fopen() {
 	f.readTimeLimit()
 	name := f.readString()
-	falg := f.readInt32()
+	flag := f.readInt32()
 
-	fp, err := fs.openFile(name, flag)
+	fp, err := fs.OpenFile(name, int(flag))
 	if err != nil {
-		panic(WarningError(err))
+		panic(WarningError(err.Error()))
 	}
 
 	f.pos++
 	f.files[f.pos] = fp
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
-	f.WriteUint32(f.pos)
+	f.writeUint8(status_ok)
+	f.writeUint32(f.pos)
 }
 
 func (f *fconn) a_fread() {
 	f.readTimeLimit()
-	pos := f.ReadUint32()
-	count := f.ReadInt64()
+	pos := f.readUint32()
+	count := f.readInt64()
 
 	fp := f.getFile(pos)
 	reader := io.LimitReader(fp, count)
 
-	f.writeDataTimeLimit()
-	f.WriteUint8(status_ok)
+	f.writeUint8(status_ok)
 	f.writeChunkedFromReader(reader)
 }
 
 func (f *fconn) a_fwrite() {
 	f.readTimeLimit()
-	pos := f.ReadUint32()
+	pos := f.readUint32()
 
 	fp := f.getFile(pos)
 
-	f.ReadChunkedToWriter(fp)
+	f.readChunkedToWriter(fp)
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
+	f.writeUint8(status_ok)
 }
 
 func (f *fconn) a_flock() {
@@ -302,27 +283,29 @@ func (f *fconn) a_funlock() {
 
 func (f *fconn) a_flush() {
 	f.readTimeLimit()
-	pos := f.ReadUint32()
+	pos := f.readUint32()
 	fp := f.getFile(pos)
 
-	err = fp.Sync()
+	err := fp.Sync()
 	if err != nil {
-		panic(WarningError(err))
+		panic(WarningError(err.Error()))
 	}
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
+	f.writeUint8(status_ok)
 }
 
 func (f *fconn) a_fseek() {
 	f.readTimeLimit()
-	pos := f.ReadUint32()
-	offset := f.ReadInt64()
-	mode := f.ReadUint8()
+	pos := f.readUint32()
+	offset := f.readInt64()
+	mode := f.readUint8()
 
 	fp := f.getFile(pos)
 
 	var off int64
+	var err error
+
 	switch int(mode) {
 	case os.SEEK_SET:
 		off, err = fp.Seek(offset, os.SEEK_SET)
@@ -335,84 +318,84 @@ func (f *fconn) a_fseek() {
 	}
 
 	if err != nil {
-		panic(WarningError(err))
+		panic(WarningError(err.Error()))
 	}
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
-	f.Writeint64(off)
+	f.writeUint8(status_ok)
+	f.writeInt64(off)
 }
 
 func (f *fconn) a_fstat() {
 	f.readTimeLimit()
-	pos := f.ReadUint32()
+	pos := f.readUint32()
 
 	fp := f.getFile(pos)
 
 	fi, err := fp.Stat()
 	if err != nil {
-		panic(WarningError(err))
+		panic(WarningError(err.Error()))
 	}
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
-	f.WriteUint32(fi.Mode())
-	f.WriteInt64(fi.Size())
-	f.WriteInt64(fi.ModTime().Unix())
+	f.writeUint8(status_ok)
+	f.writeUint32(uint32(fi.Mode()))
+	f.writeInt64(fi.Size())
+	f.writeInt64(fi.ModTime().Unix())
 }
 
 func (f *fconn) a_ftrucate() {
 	f.readTimeLimit()
-	pos := f.ReadUint32()
-	size := f.ReadInt64()
+	pos := f.readUint32()
+	size := f.readInt64()
 
 	fp := f.getFile(pos)
 
-	err = fp.Truncate(size)
+	err := fp.Truncate(size)
 	if err != nil {
-		panic(WarningError(err))
+		panic(WarningError(err.Error()))
 	}
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
+	f.writeUint8(status_ok)
 }
 
 func (f *fconn) a_fclose() {
 	f.readTimeLimit()
-	pos := f.ReadUint32()
+	pos := f.readUint32()
 
 	fp := f.getFile(pos)
 
-	fi, err := fp.Close()
-	if err == nil {
-		panic(WarningError(err))
+	err := fp.Close()
+	if err != nil {
+		panic(WarningError(err.Error()))
 	}
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
+	f.writeUint8(status_ok)
 }
 
 func (f *fconn) a_opendir() {
 	f.readTimeLimit()
 	name := f.readString()
 
-	fp, err := fs.open(name)
+	fp, err := fs.Open(name)
 	if err != nil {
-		panic(WarningError(err))
+		panic(WarningError(err.Error()))
 	}
 
 	f.pos++
 	f.files[f.pos] = fp
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
-	f.WriteUint32(pos)
+	f.writeUint8(status_ok)
+	f.writeUint32(f.pos)
 }
 
 func (f *fconn) a_readdir() {
 	f.readTimeLimit()
-	pos := f.ReadUint32()
-	count := f.ReadUint16()
+	pos := f.readUint32()
+	count := f.readUint16()
 
 	fp := f.getFile(pos)
 
@@ -420,75 +403,77 @@ func (f *fconn) a_readdir() {
 		panic(NoticeError("一次读取的文件夹数量过多"))
 	}
 
-	fi, err = fp.Readdir(int(count))
+	fi, err := fp.Readdir(int(count))
 	if err != nil {
-		panic(WarningError(err))
+		panic(WarningError(err.Error()))
 	}
 
 	num := uint16(len(fi))
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
-	f.WriteUint16(num)
+	f.writeUint8(status_ok)
+	f.writeUint16(num)
 
-	f.writeDataTimeLimit()
 	for _, val := range fi {
+		f.writeTimeLimit()
 		f.writeString(val.Name())
 	}
 }
 
 func (f *fconn) a_closedir() {
 	f.readTimeLimit()
-	pos := f.ReadUint32()
+	pos := f.readUint32()
 
 	fp := f.getFile(pos)
 
-	fi, err := fp.Close()
-	if err == nil {
-		panic(WarningError(err))
+	err := fp.Close()
+	if err != nil {
+		panic(WarningError(err.Error()))
 	}
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
+	f.writeUint8(status_ok)
 }
 
 func (f *fconn) a_mkdir() {
 	f.readTimeLimit()
 	name := f.readString()
-	mode := f.ReadUint32()
-	rec := f.ReadUint8()
+	rec := f.readUint8()
+
+	var err error
 
 	if rec == 0 {
-		err = os.Mkdir(name, mode)
+		err = fs.Mkdir(name)
 	} else {
-		err = os.MkdirALL(name, mode)
+		err = fs.MkdirAll(name)
 	}
 
 	if err != nil {
-		panic(WarningError(err))
+		panic(WarningError(err.Error()))
 	}
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
+	f.writeUint8(status_ok)
 }
 
 func (f *fconn) a_rmdir() {
 	f.readTimeLimit()
 	name := f.readString()
-	rec := f.ReadUint8()
+	rec := f.readUint8()
 
+	var err error
 	if rec == 0 {
-		err = os.Remove(name)
+		err = fs.Remove(name)
 	} else {
-		err = os.RemoveAll(name)
+		err = fs.RemoveAll(name)
 	}
 
 	if err != nil {
-		panic(WarningError(err))
+		panic(WarningError(err.Error()))
 	}
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
+	f.writeUint8(status_ok)
 }
 
 func (f *fconn) a_rename() {
@@ -496,13 +481,13 @@ func (f *fconn) a_rename() {
 	name := f.readString()
 	to := f.readString()
 
-	err = fs.Rename(name, to)
+	err := fs.Rename(name, to)
 	if err != nil {
-		panic(WarningError(err))
+		panic(WarningError(err.Error()))
 	}
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
+	f.writeUint8(status_ok)
 }
 
 func (f *fconn) a_stat() {
@@ -511,14 +496,14 @@ func (f *fconn) a_stat() {
 
 	fi, err := fs.Stat(name)
 	if err != nil {
-		panic(WarningError(err))
+		panic(WarningError(err.Error()))
 	}
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
-	f.WriteUint32(fi.Mode())
-	f.WriteInt64(fi.Size())
-	f.WriteInt64(fi.ModTime().Unix())
+	f.writeUint8(status_ok)
+	f.writeUint32(uint32(fi.Mode()))
+	f.writeInt64(fi.Size())
+	f.writeInt64(fi.ModTime().Unix())
 }
 
 func (f *fconn) a_lstat() {
@@ -527,14 +512,14 @@ func (f *fconn) a_lstat() {
 
 	fi, err := fs.Lstat(name)
 	if err != nil {
-		panic(WarningError(err))
+		panic(WarningError(err.Error()))
 	}
 
 	f.writeTimeLimit()
-	f.WriteUint8(status_ok)
-	f.WriteUint32(fi.Mode())
-	f.WriteInt64(fi.Size())
-	f.WriteInt64(fi.ModTime().Unix())
+	f.writeUint8(status_ok)
+	f.writeUint32(uint32(fi.Mode()))
+	f.writeInt64(fi.Size())
+	f.writeInt64(fi.ModTime().Unix())
 	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
 }
 
@@ -544,150 +529,212 @@ func (f *fconn) readString() string {
 	var strlen uint16
 	err := binary.Read(f.bufrw, binary.BigEndian, &strlen)
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 
-	if strlen > maxString {
-		panic(FatalError(err))
-	}
-
+	//极限是64k(uint16)
 	data := make([]byte, strlen)
 	_, err = f.bufrw.Read(data)
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 
 	return string(data)
 }
 
 func (f fconn) writeString(str string) {
-	if len(str) > maxString {
-		panic(FatalError("写入字符串过长"))
+	//极限是64k(uint16)
+	if len(str) > 65535 {
+		panic(FatalError("写入的字符串过长"))
 	}
 
 	num := uint16(len(str))
 
 	err := binary.Write(f.bufrw, binary.BigEndian, num)
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 
 	_, err = f.bufrw.WriteString(str)
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 }
+
+//------------------
 
 func (f fconn) writeError(str ...interface{}) {
 	f.writeTimeLimit()
 
 	err := binary.Write(f.bufrw, binary.BigEndian, status_fail)
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 
 	_, err = f.bufrw.WriteString(fmt.Sprint(str...))
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 
 	err = f.bufrw.Flush()
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 }
-
-//------------------
-
-
-
 
 // ------ 超时 ----------------
 
 func (f *fconn) idleTimeLimit() {
 	err := f.conn.SetReadDeadline(time.Now().Add(idleTimeout))
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 }
 
 func (f *fconn) readTimeLimit() {
 	err := f.conn.SetReadDeadline(time.Now().Add(actionTimeout))
 	if err != nil {
-		panic(FatalError(err))
-	}
-}
-
-func (f *fconn) readDataTimeLimit(length int) {
-	need := length / 1024 / minTransferSpeed
-
-	t := (actionTimeout + need) * time.Second
-
-	err := f.conn.SetReadDeadline(time.Now().Add(t))
-	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 }
 
 func (f *fconn) writeTimeLimit() {
 	err := f.conn.SetWriteDeadline(time.Now().Add(idleTimeout))
 	if err != nil {
-		panic(FatalError(err))
-	}
-}
-
-func (f *fconn) writeDataTimeLimit(length int) {
-	need := length / 1024 / minTransferSpeed
-
-	t := (actionTimeout + need) * time.Second
-
-	err := f.conn.SetWriteDeadline(time.Now().Add(t))
-	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 }
 
 // ------ 读取 int ----------------
 
-func (f *fconn) readInt32() int32 {
-	var number int32
+func (f *fconn) readInt8() (number int8) {
 	err := binary.Read(f.bufrw, binary.BigEndian, &number)
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
+	return
+}
 
-	return number
+func (f *fconn) readInt16() (number int16) {
+	err := binary.Read(f.bufrw, binary.BigEndian, &number)
+	if err != nil {
+		panic(FatalError(err.Error()))
+	}
+	return
+}
+
+func (f *fconn) readInt32() (number int32) {
+	err := binary.Read(f.bufrw, binary.BigEndian, &number)
+	if err != nil {
+		panic(FatalError(err.Error()))
+	}
+	return
+}
+
+func (f *fconn) readInt64() (number int64) {
+	err := binary.Read(f.bufrw, binary.BigEndian, &number)
+	if err != nil {
+		panic(FatalError(err.Error()))
+	}
+	return
 }
 
 // ------ 读取 uint ----------------
 
-func (f *fconn) readUint8(number uint8) {
+func (f *fconn) readUint8() (number uint8) {
 	err := binary.Write(f.bufrw, binary.BigEndian, &number)
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
+	}
+	return
+}
+
+func (f *fconn) readUint16() (number uint16) {
+	err := binary.Read(f.bufrw, binary.BigEndian, &number)
+	if err != nil {
+		panic(FatalError(err.Error()))
+	}
+	return
+}
+
+func (f *fconn) readUint32() (number uint32) {
+	err := binary.Read(f.bufrw, binary.BigEndian, &number)
+	if err != nil {
+		panic(FatalError(err.Error()))
+	}
+	return
+}
+
+func (f *fconn) readUint64() (number uint64) {
+	err := binary.Read(f.bufrw, binary.BigEndian, &number)
+	if err != nil {
+		panic(FatalError(err.Error()))
+	}
+	return
+}
+
+// ------ 写入 int ----------------
+
+func (f *fconn) writeInt8(number int8) {
+	err := binary.Write(f.bufrw, binary.BigEndian, &number)
+	if err != nil {
+		panic(FatalError(err.Error()))
 	}
 }
 
-func (f *fconn) readUint16() uint16 {
-	var number uint16
-	err := binary.Read(f.bufrw, binary.BigEndian, &number)
+func (f *fconn) writeInt16(number int16) {
+	err := binary.Write(f.bufrw, binary.BigEndian, &number)
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
+}
 
-	return number
+func (f *fconn) writeInt32(number int32) {
+	err := binary.Write(f.bufrw, binary.BigEndian, &number)
+	if err != nil {
+		panic(FatalError(err.Error()))
+	}
+}
+
+func (f *fconn) writeInt64(number int64) {
+	err := binary.Write(f.bufrw, binary.BigEndian, &number)
+	if err != nil {
+		panic(FatalError(err.Error()))
+	}
 }
 
 // ------ 写入 uint ----------------
 
-func (f *fconn) readuInt8(number uint32) {
+func (f *fconn) writeUint8(number uint8) {
 	err := binary.Write(f.bufrw, binary.BigEndian, &number)
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
+	}
+}
+
+func (f *fconn) writeUint16(number uint16) {
+	err := binary.Write(f.bufrw, binary.BigEndian, &number)
+	if err != nil {
+		panic(FatalError(err.Error()))
+	}
+}
+
+func (f *fconn) writeUint32(number uint32) {
+	err := binary.Write(f.bufrw, binary.BigEndian, &number)
+	if err != nil {
+		panic(FatalError(err.Error()))
+	}
+}
+
+func (f *fconn) writeUint64(number uint64) {
+	err := binary.Write(f.bufrw, binary.BigEndian, &number)
+	if err != nil {
+		panic(FatalError(err.Error()))
 	}
 }
 
 // ------ 数据读写 ----------------
+
 func (f fconn) writeChunkedFromReader(r io.Reader) {
 	//1k buf
 	buf := make([]byte, 2048)
@@ -698,9 +745,9 @@ func (f fconn) writeChunkedFromReader(r io.Reader) {
 		n, err := r.Read(buf)
 		if err != nil && err != io.EOF {
 			//强型结束
-			f.WriteUint16(0)
+			f.writeUint16(0)
 			//响应错误
-			panic(WarningError(err))
+			panic(WarningError(err.Error()))
 		}
 
 		if n > 0 {
@@ -709,26 +756,26 @@ func (f fconn) writeChunkedFromReader(r io.Reader) {
 
 		//分段结束
 		if err == io.EOF {
-			f.WriteUint16(0)
-			f.WriteUint8(status_ok)
+			f.writeUint16(0)
+			f.writeUint8(status_ok)
 		}
 	}
 }
 
 func (f fconn) writeData(buf []byte) {
-	f.WriteUint16(uint16(len(buf)))
+	f.writeUint16(uint16(len(buf)))
 
-	err := f.bufrw.Write(buf)
+	_, err := f.bufrw.Write(buf)
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 }
 
-func (f *fconn) ReadChunkedToWriter(w io.Writer) {
+func (f *fconn) readChunkedToWriter(w io.Writer) {
 	for {
 		f.readTimeLimit()
 
-		buf := f.ReadData()
+		buf := f.readData()
 		//结束
 		if buf == nil {
 			return
@@ -736,24 +783,24 @@ func (f *fconn) ReadChunkedToWriter(w io.Writer) {
 
 		_, err := w.Write(buf)
 		if err != nil {
-			panic(FatalError(err))
+			panic(FatalError(err.Error()))
 		}
 	}
 }
 
-func (f *fconn) ReadData() []byte {
-	count := f.ReadUint16()
+func (f *fconn) readData() []byte {
+	count := f.readUint16()
 
 	if count == 0 {
 		return nil
 	}
 
-	//极限是15k(uint16)
+	//极限是64k(uint16)
 	buf := make([]byte, count)
 
 	_, err := f.bufrw.Read(buf)
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 
 	return buf
@@ -761,15 +808,15 @@ func (f *fconn) ReadData() []byte {
 
 // ------ 杂项 ----------------
 
-func (f *fconn) Flush () {
+func (f *fconn) flush () {
 	err := f.bufrw.Flush()
 	if err != nil {
-		panic(FatalError(err))
+		panic(FatalError(err.Error()))
 	}
 }
 
 
-func (f *fconn) getFile (pos uint32) *os.File {
+func (f *fconn) getFile (pos uint32) *file {
 	fp := f.files[pos]
 	if fp == nil {
 		panic(FatalError("文件描术符错误"))

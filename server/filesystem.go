@@ -52,6 +52,79 @@ func (f *filesystem) OpenFile(name string, flag int) (*file, error) {
 	return ff, nil
 }
 
+func (f *filesystem) Mkdir(name string) error {
+	name = f.pathToFile(name)
+	if name == "." {
+		return errors.New("File Name Error");
+	}
+
+	err := os.Mkdir(name, fs.fileMode)
+	return err
+}
+
+func (f *filesystem) MkdirAll(name string) error {
+	name = f.pathToFile(name)
+	if name == "." {
+		return errors.New("File Name Error");
+	}
+
+	err := os.MkdirAll(name, fs.fileMode)
+	return err
+}
+
+func (f *filesystem) Remove(name string) error {
+	name = f.pathToFile(name)
+	if name == "." {
+		return errors.New("File Name Error");
+	}
+
+	err := os.Remove(name)
+	return err
+}
+
+func (f *filesystem) RemoveAll(name string) error {
+	name = f.pathToFile(name)
+	if name == "." {
+		return errors.New("File Name Error");
+	}
+
+	err := os.RemoveAll(name)
+	return err
+}
+
+func (f *filesystem) Rename(name, to string) error {
+	name = f.pathToFile(name)
+	if name == "." {
+		return errors.New("File Name Error");
+	}
+
+	to = f.pathToFile(to)
+	if to == "." {
+		return errors.New("File Name Error");
+	}
+
+	err := os.Rename(name, to)
+	return err
+}
+
+func (f *filesystem) Lstat(name string) (os.FileInfo, error) {
+	name = f.pathToFile(name)
+	if name == "." {
+		return nil, errors.New("File Name Error");
+	}
+
+	return os.Lstat(name)
+}
+
+func (f *filesystem) Stat(name string) (os.FileInfo, error) {
+	name = f.pathToFile(name)
+	if name == "." {
+		return nil, errors.New("File Name Error");
+	}
+
+	return os.Lstat(name)
+}
+
 type file struct{
 	*os.File
 	name string

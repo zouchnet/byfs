@@ -44,7 +44,6 @@ class ByfsFileSystem
 
 		$stream->write_uint16(ByfsStream::CODE_MKDIR);
 		$stream->write_string($path);
-		$stream->write_uInt32($mode);
 		$stream->write_uInt8($recursive ? 1 : 0);
 
 		return $stream->read_bool();

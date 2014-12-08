@@ -72,7 +72,7 @@ func authHander(w http.ResponseWriter, r *http.Request, handler func(http.Respon
 	if *password != "" {
 		token := r.Header.Get("Byfs-Auth")
 
-		ok := tokenAuth(r.URL.Path, token);
+		ok := tokenAuth(r.URL.Path, *password, token);
 		if !ok {
 			http.Error(w, "403 Forbidden", http.StatusForbidden)
 			log.Println("Auth Error", r.RemoteAddr)
@@ -154,7 +154,7 @@ func deleteFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func postStream(w http.ResponseWriter, r *http.Request) {
-	f, ok := fconnInit(w, r, *password)
+	f, ok := FconnInit(w, r, *password)
 	if !ok {
 		return
 	}
