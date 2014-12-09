@@ -159,6 +159,10 @@ class ByfsStream
 	{
 		$num = $this->read_uint16();
 
+		if ($num == 0) {
+			return '';
+		}
+
 		return $this->_read($num);
 	}
 
@@ -281,17 +285,13 @@ class ByfsStream
 
 	private function _read($len)
 	{
-		if ($len == 0) {
-			return '';
-		}
-
 		$data = fread($this->fp, $len);
 
 		if ($data === false) {
 			throw new Exception('Stream Read Error!');
 		}
 
-		if ($data == "") {
+		if (strlen($data) != $len) {
 			throw new Exception('Stream Read EOF');
 		}
 

@@ -95,7 +95,7 @@ class ByfsStreamFile
 		$this->offset = null;
 		$this->stream->write_uint16(ByfsStream::CODE_FILE_READ);
 		$this->stream->write_uint32($this->fp);
-		$this->stream->write_uint32($count);
+		$this->stream->write_int64($count);
 		$ok = $this->stream->read_bool();
 		if (!$ok) {
 			return false;
@@ -104,9 +104,9 @@ class ByfsStreamFile
 		$data = "";
 
 		do {
-			$tmp = $this->read_string();
+			$tmp = $this->stream->read_string();
 			$data .= $tmp;
-		} while ($tmp == "");
+		} while ($tmp != "");
 
 		$ok = $this->stream->read_bool();
 		if (!$ok) {
@@ -196,7 +196,7 @@ class ByfsStreamFile
 			$this->offset = -1;
 			return -1;
 		}
-		$this->offset = $this->stream->read_uint64();
+		$this->offset = $this->stream->read_int64();
 		$this->eof = false;
 		return 0;
     }

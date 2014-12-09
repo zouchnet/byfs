@@ -275,6 +275,7 @@ func (f *fconn) a_fread() {
 
 	f.writeUint8(status_ok)
 	f.writeChunkedFromReader(reader)
+	f.writeUint8(status_ok)
 }
 
 func (f *fconn) a_fwrite() {
@@ -581,20 +582,11 @@ func (f fconn) writeString(str string) {
 func (f fconn) writeError(str ...interface{}) {
 	f.writeTimeLimit()
 
-	err := binary.Write(f.bufrw, binary.BigEndian, status_fail)
-	if err != nil {
-		panic(FatalError(err.Error()))
-	}
+	f.writeUint8(status_fail)
 
-	_, err = f.bufrw.WriteString(fmt.Sprint(str...))
-	if err != nil {
-		panic(FatalError(err.Error()))
-	}
-
-	err = f.bufrw.Flush()
-	if err != nil {
-		panic(FatalError(err.Error()))
-	}
+	txt := fmt.Sprint(str...)
+	f.writeString(txt)
+	f.flush()
 }
 
 // ------ 超时 ----------------
@@ -614,7 +606,7 @@ func (f *fconn) readTimeLimit() {
 }
 
 func (f *fconn) writeTimeLimit() {
-	err := f.conn.SetWriteDeadline(time.Now().Add(idleTimeout))
+	err := f.conn.SetWriteDeadline(time.Now().Add(actionTimeout))
 	if err != nil {
 		panic(FatalError(err.Error()))
 	}
@@ -758,21 +750,18 @@ func (f fconn) writeChunkedFromReader(r io.Reader) {
 		f.writeTimeLimit()
 
 		n, err := r.Read(buf)
-		if err != nil && err != io.EOF {
-			//强型结束
+		if err != nil {
+			//分段结束
 			f.writeUint16(0)
+			if err == io.EOF {
+				return
+			}
 			//响应错误
 			panic(WarningError(err.Error()))
 		}
 
 		if n > 0 {
 			f.writeData(buf[:n])
-		}
-
-		//分段结束
-		if err == io.EOF {
-			f.writeUint16(0)
-			f.writeUint8(status_ok)
 		}
 	}
 }
