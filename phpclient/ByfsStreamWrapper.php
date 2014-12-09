@@ -25,6 +25,8 @@ final class ByfsStreamWrapper
 
 	public function dir_opendir($path)
 	{
+		$path = substr($path, strlen("byfs://"));
+
 		$this->dir = ByfsFileSystem::opendir($path);
 
 		return $this->dir ? true : false;
@@ -42,6 +44,8 @@ final class ByfsStreamWrapper
 
 	public function mkdir($path, $mode, $options)
 	{
+		$path = substr($path, strlen("byfs://"));
+
 		$ok = ByfsFileSystem::mkdir($path, $mode, $options);
 
 		if (!$ok) {
@@ -53,6 +57,9 @@ final class ByfsStreamWrapper
 
 	public function rename($from, $to)
 	{
+		$from = substr($from, strlen("byfs://"));
+		$to = substr($to, strlen("byfs://"));
+
 		$ok = ByfsFileSystem::rename($from, $to);
 
 		if (!$ok) {
@@ -64,6 +71,8 @@ final class ByfsStreamWrapper
 
 	public function rmdir($path, $options)
 	{
+		$path = substr($path, strlen("byfs://"));
+
 		//不如道如何触发的
 		$recursive = $options & STREAM_MKDIR_RECURSIVE;
 
@@ -101,16 +110,20 @@ final class ByfsStreamWrapper
 
 	public function stream_metadata($path, $option, $value)
 	{
+		$path = substr($path, strlen("byfs://"));
 		return false;
 	}
 
     public function stream_open($path, $mode, $options, &$opened_path)
     {
+		$path = substr($path, strlen("byfs://"));
+
 		//miss
 		//$use_include_path = $options & STREAM_USE_PATH;
 		$quiet = !($options & STREAM_REPORT_ERRORS);
 
 		$this->fp = ByfsFileSystem::fopen($path, $mode);
+		var_dump($this->fp, $path, $mode);
 
 		if (!$this->fp && !$quiet) {
 			trigger_error("open error! file:{$path}", E_USER_ERROR);
@@ -154,6 +167,8 @@ final class ByfsStreamWrapper
 
 	public function unlink($path)
 	{
+		$path = substr($path, strlen("byfs://"));
+
 		$ok = ByfsFileSystem::unlink($path);
 
 		if (!$ok) {
@@ -165,6 +180,8 @@ final class ByfsStreamWrapper
 
 	public function url_stat($path, $flag)
 	{
+		$path = substr($path, strlen("byfs://"));
+
 		$link = $flag & STREAM_URL_STAT_LINK;
 		//file_exists等检测函数需要无报错
 		$quiet = $flag & STREAM_URL_STAT_QUIET;
