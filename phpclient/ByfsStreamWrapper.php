@@ -123,7 +123,6 @@ final class ByfsStreamWrapper
 		$quiet = !($options & STREAM_REPORT_ERRORS);
 
 		$this->fp = ByfsFileSystem::fopen($path, $mode);
-		var_dump($this->fp, $path, $mode);
 
 		if (!$this->fp && !$quiet) {
 			trigger_error("open error! file:{$path}", E_USER_ERROR);

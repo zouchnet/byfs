@@ -16,7 +16,7 @@ var dirroot = flag.String("dir", ".", "file dir")
 
 var fileMode os.FileMode = 0644
 
-var fs = &filesystem{}
+var fs *filesystem
 
 func main() {
 	flag.Parse()
@@ -52,8 +52,7 @@ func initFilesystem() {
 		log.Fatalln("path not a dir")
 	}
 
-	fs.rootdir = *dirroot
-	fs.fileMode = fileMode
+	fs = new(filesystem).Init(*dirroot, fileMode)
 }
 
 

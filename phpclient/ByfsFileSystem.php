@@ -108,31 +108,16 @@ class ByfsFileSystem
 		$stream->write_uint16(ByfsStream::CODE_STAT);
 		$stream->write_string($path);
 
-		$ok = $this->stream->read_bool();
+		$ok = $stream->read_bool();
 		if (!$ok) {
 			return false;
 		}
-		$mode = $this->stream->read_uint32();
-		$size = $this->stream->read_int64();
-		$modTime = $this->stream->read_int64();
 
-		$data = array(
-			'dev' => 0,
-			'ino' => 0,
-			'mode' => $mode,
-			'nlink' => 0,
-			'uid' => 0,
-			'gid' => 0,
-			'rdev' => 0,
-			'size' => $size,
-			'atime' => 0,
-			'mtime' => $modTime,
-			'ctime' => 0,
-			'blksize' => 0,
-			'blocks' => 0,
-		);
+		$is_dir = $stream->read_uint8();
+		$size = $stream->read_int64();
+		$modTime = $stream->read_int64();
 
-		return $data;
+		return self::_buildStat($is_dir, $size, $modTime);
 	}
 
 	static public function lstat($path)
@@ -142,13 +127,26 @@ class ByfsFileSystem
 		$stream->write_uint16(ByfsStream::CODE_LSTAT);
 		$stream->write_string($path);
 
-		$ok = $this->stream->read_bool();
+		$ok = $stream->read_bool();
 		if (!$ok) {
 			return false;
 		}
-		$mode = $this->stream->read_uint32();
-		$size = $this->stream->read_int64();
-		$modTime = $this->stream->read_int64();
+
+		$is_dir = $stream->read_uint8();
+		$size = $stream->read_int64();
+		$modTime = $stream->read_int64();
+
+		return self::_buildStat($is_dir, $size, $modTime);
+	}
+
+	public static function _buildStat($is_dir, $size, $modTime)
+	{
+		//在网络环境下查看文件权限没有意义
+		if ($is_dir) {
+			$mode = 0040000 + 0777;
+		} else {
+			$mode = 0100000 + 0777;
+		}
 
 		$data = array(
 			'dev' => 0,

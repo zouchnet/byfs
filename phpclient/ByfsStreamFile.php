@@ -154,28 +154,8 @@ class ByfsStreamFile
 
 	public function lock($operation)
 	{
-		//解锁
-		if ($operation & LOCK_UN) {
-			$this->stream->write_uint16(ByfsStream::CODE_FILE_UNLOCK);
-			$this->stream->write_uint32($this->fp);
-			return $this->stream->read_bool();
-		}
-
-		$mode = 0;
-		if ($operation & LOCK_SH) {
-			$mode |= 1;
-		}
-		if ($operation & LOCK_EX) {
-			$mode |= 2;
-		}
-		if ($operation & LOCK_NB) {
-			$mode |= 4;
-		}
-
-		$this->stream->write_uint16(ByfsStream::CODE_FILE_LOCK);
-		$this->stream->write_uint32($this->fp);
-		$this->stream->write_uint8($mode);
-		return $this->stream->read_bool();
+		//不支持加锁
+		return false;
 	}
 	
 	public function seek($offset, $whence)
@@ -186,6 +166,7 @@ class ByfsStreamFile
 		case SEEK_END: $mode = 2; break;
 		default : throw new Exception('seek whence error!');
 		}
+		var_dump($offset, $mode);
 
 		$this->stream->write_uint16(ByfsStream::CODE_FILE_SEEK);
 		$this->stream->write_uint32($this->fp);
@@ -197,6 +178,7 @@ class ByfsStreamFile
 			return -1;
 		}
 		$this->offset = $this->stream->read_int64();
+		var_dump('re', $this->offset);
 		$this->eof = false;
 		return 0;
     }
@@ -218,27 +200,12 @@ class ByfsStreamFile
 		if (!$ok) {
 			return false;
 		}
-		$mode = $this->stream->read_uint32();
+
+		$is_dir = $this->stream->read_uint8();
 		$size = $this->stream->read_int64();
 		$modTime = $this->stream->read_int64();
 
-		$data = array(
-			'dev' => 0,
-			'ino' => 0,
-			'mode' => $mode,
-			'nlink' => 0,
-			'uid' => 0,
-			'gid' => 0,
-			'rdev' => 0,
-			'size' => $size,
-			'atime' => 0,
-			'mtime' => $modTime,
-			'ctime' => 0,
-			'blksize' => 0,
-			'blocks' => 0,
-		);
-
-		return $data;
+		return ByfsFileSystem::_buildStat($is_dir, $size, $modTime);
 	}
 
 	public function truncate($new_size)

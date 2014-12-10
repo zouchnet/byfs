@@ -19,13 +19,11 @@ const (
 	CODE_FILE_OPEN = 1
 	CODE_FILE_READ = 2
 	CODE_FILE_WRITE = 3
-	CODE_FILE_LOCK = 4
-	CODE_FILE_UNLOCK = 5
-	CODE_FILE_SEEK = 6
-	CODE_FILE_STAT = 7
-	CODE_FILE_FLUSH = 8
-	CODE_FILE_TRUCATE = 9
-	CODE_FILE_CLOSE = 10
+	CODE_FILE_SEEK = 4
+	CODE_FILE_STAT = 5
+	CODE_FILE_FLUSH = 6
+	CODE_FILE_TRUNCATE = 7
+	CODE_FILE_CLOSE = 8
 
 	CODE_DIR_OPEN = 1001
 	CODE_DIR_READ = 1002
@@ -207,18 +205,14 @@ func (f *fconn) _run(code uint16) {
 			f.a_fread()
 		case CODE_FILE_WRITE :
 			f.a_fwrite()
-		case CODE_FILE_LOCK :
-			f.a_flock()
-		case CODE_FILE_UNLOCK :
-			f.a_funlock()
 		case CODE_FILE_SEEK :
 			f.a_fseek()
 		case CODE_FILE_STAT :
 			f.a_fstat()
 		case CODE_FILE_FLUSH :
 			f.a_flush()
-		case CODE_FILE_TRUCATE :
-			f.a_ftrucate()
+		case CODE_FILE_TRUNCATE :
+			f.a_truncate()
 		case CODE_FILE_CLOSE :
 			f.a_fclose()
 
@@ -273,6 +267,7 @@ func (f *fconn) a_fread() {
 	fp := f.getFile(pos)
 	reader := io.LimitReader(fp, count)
 
+	f.writeTimeLimit()
 	f.writeUint8(status_ok)
 	f.writeChunkedFromReader(reader)
 	f.writeUint8(status_ok)
@@ -288,12 +283,6 @@ func (f *fconn) a_fwrite() {
 
 	f.writeTimeLimit()
 	f.writeUint8(status_ok)
-}
-
-func (f *fconn) a_flock() {
-}
-
-func (f *fconn) a_funlock() {
 }
 
 func (f *fconn) a_flush() {
@@ -352,14 +341,19 @@ func (f *fconn) a_fstat() {
 		panic(WarningError(err.Error()))
 	}
 
+	var is_dir uint8 = 0
+	if fi.IsDir() {
+		is_dir = 1
+	}
+
 	f.writeTimeLimit()
 	f.writeUint8(status_ok)
-	f.writeUint32(uint32(fi.Mode()))
+	f.writeUint8(is_dir)
 	f.writeInt64(fi.Size())
 	f.writeInt64(fi.ModTime().Unix())
 }
 
-func (f *fconn) a_ftrucate() {
+func (f *fconn) a_truncate() {
 	f.readTimeLimit()
 	pos := f.readUint32()
 	size := f.readInt64()
@@ -515,9 +509,14 @@ func (f *fconn) a_stat() {
 		panic(WarningError(err.Error()))
 	}
 
+	var is_dir uint8 = 0
+	if fi.IsDir() {
+		is_dir = 1
+	}
+
 	f.writeTimeLimit()
 	f.writeUint8(status_ok)
-	f.writeUint32(uint32(fi.Mode()))
+	f.writeUint8(is_dir)
 	f.writeInt64(fi.Size())
 	f.writeInt64(fi.ModTime().Unix())
 }
@@ -531,9 +530,14 @@ func (f *fconn) a_lstat() {
 		panic(WarningError(err.Error()))
 	}
 
+	var is_dir uint8 = 0
+	if fi.IsDir() {
+		is_dir = 1
+	}
+
 	f.writeTimeLimit()
 	f.writeUint8(status_ok)
-	f.writeUint32(uint32(fi.Mode()))
+	f.writeUint8(is_dir)
 	f.writeInt64(fi.Size())
 	f.writeInt64(fi.ModTime().Unix())
 	f.conn.SetReadDeadline(time.Now().Add(actionTimeout))

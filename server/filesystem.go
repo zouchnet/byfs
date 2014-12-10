@@ -10,10 +10,16 @@ import (
 
 type filesystem struct {
 	mu sync.Mutex
-	files map[string]sync.RWMutex
-	nums map[string]int
+	locks map[string]*lock
 	fileMode os.FileMode
 	rootdir string
+}
+
+func (f *filesystem) Init(root string, mode os.FileMode) *filesystem {
+	f.rootdir = root
+	f.fileMode = mode
+	f.locks = make(map[string]*lock)
+	return f
 }
 
 func (f *filesystem) pathToFile(p string) string {
@@ -123,6 +129,56 @@ func (f *filesystem) Stat(name string) (os.FileInfo, error) {
 	}
 
 	return os.Lstat(name)
+}
+
+func (f *filesystem) Lock(name string) {
+	f.mu.Lock()
+	l := f.locks[name]
+	if l == nil {
+		l = new(lock)
+		f.locks[name] = l
+	}
+	l.num++
+	f.mu.Unlock()
+
+	f.locks[name].rw.Lock()
+}
+
+func (f *filesystem) RLock(name string) {
+	f.mu.Lock()
+	l := f.locks[name]
+	if l == nil {
+		l = new(lock)
+		f.locks[name] = l
+	}
+	l.num++
+	f.mu.Unlock()
+
+	f.locks[name].rw.RLock()
+}
+
+func (f *filesystem) Unlock(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	l := f.locks[name]
+
+	if f.locks[name] == nil {
+		delete(f.locks, name)
+		return
+	}
+
+	l.rw.Unlock()
+	l.num--
+
+	if l.num < 1 {
+		delete(f.locks, name)
+	}
+}
+
+type lock struct {
+	rw sync.RWMutex
+	num int
 }
 
 type file struct{

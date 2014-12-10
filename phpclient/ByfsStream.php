@@ -11,13 +11,11 @@ class ByfsStream
 	const CODE_FILE_OPEN = 1;
 	const CODE_FILE_READ = 2;
 	const CODE_FILE_WRITE = 3;
-	const CODE_FILE_LOCK = 4;
-	const CODE_FILE_UNLOCK = 5;
-	const CODE_FILE_SEEK = 6;
-	const CODE_FILE_STAT = 7;
-	const CODE_FILE_FLUSH = 8;
-	const CODE_FILE_TRUCATE = 9;
-	const CODE_FILE_CLOSE = 10;
+	const CODE_FILE_SEEK = 4;
+	const CODE_FILE_STAT = 5;
+	const CODE_FILE_FLUSH = 6;
+	const CODE_FILE_TRUNCATE = 7;
+	const CODE_FILE_CLOSE = 8;
 
 	const CODE_DIR_OPEN = 1001;
 	const CODE_DIR_READ = 1002;
@@ -302,7 +300,7 @@ class ByfsStream
 	{
 		$num = fwrite($this->fp, $data);
 
-		if ($num === false) {
+		if ($num !== strlen($data)) {
 			throw new Exception('Stream Write Error!');
 		}
 
