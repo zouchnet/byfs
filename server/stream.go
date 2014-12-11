@@ -563,7 +563,7 @@ func (f *fconn) readString() string {
 	return string(data)
 }
 
-func (f fconn) writeString(str string) {
+func (f *fconn) writeString(str string) {
 	//极限是64k(uint16)
 	if len(str) > 65535 {
 		panic(FatalError("写入的字符串过长"))
@@ -584,7 +584,7 @@ func (f fconn) writeString(str string) {
 
 //------------------
 
-func (f fconn) writeError(str ...interface{}) {
+func (f *fconn) writeError(str ...interface{}) {
 	f.writeTimeLimit()
 
 	f.writeUint8(status_fail)

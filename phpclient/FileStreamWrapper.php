@@ -26,10 +26,9 @@ final class FileStreamWrapper
 
 	static public function add_ghost_dir($dir, $to)
 	{
-		$_dir = str_replace("\\", '/', $dir);
-		$_to = str_replace("\\", '/', $to);
+		$_dir = self::_realpath($dir);
 
-		self::$ghost_dir[$_dir] = $_to;
+		self::$ghost_dir[$_dir] = $to;
 	}
 
 	public function dir_closedir()
@@ -96,7 +95,7 @@ final class FileStreamWrapper
 
 		self::unregister();
 		//不如道如何触发的
-		if ($options & ~STREAM_MKDIR_RECURSIVE) {
+		if ($options & STREAM_MKDIR_RECURSIVE) {
 			$result = $this->_recursive_rmdir($path);
 		} else {
 			$result = rmdir($path);
@@ -148,8 +147,8 @@ final class FileStreamWrapper
 
     public function stream_open($path, $mode, $options, &$opened_path)
     {
-		$use_include_path = $options & ~STREAM_USE_PATH;
-		$quiet = !($options & ~STREAM_REPORT_ERRORS);
+		$use_include_path = $options & STREAM_USE_PATH;
+		$quiet = !($options & STREAM_REPORT_ERRORS);
 
 		//不支持include_path
 		if ($use_include_path) {
@@ -178,7 +177,7 @@ final class FileStreamWrapper
 
 	public function stream_seek($offset, $whence)
     {
-		return fseek($fp, $offset, $whence);
+		return fseek($this->fp, $offset, $whence);
     }
 
 	// miss for stream
@@ -216,9 +215,9 @@ final class FileStreamWrapper
 
 	public function url_stat($path, $flag)
 	{
-		$link = $flag & ~STREAM_URL_STAT_LINK;
+		$link = $flag & STREAM_URL_STAT_LINK;
 		//file_exists等检测函数需要无报错
-		$quiet = $flag & ~STREAM_URL_STAT_QUIET;
+		$quiet = $flag & STREAM_URL_STAT_QUIET;
 
 		$path = $this->_realpath($path);
 
@@ -234,9 +233,7 @@ final class FileStreamWrapper
 
 	private function _realpath($path, &$ghost=null)
 	{
-		var_dump($path);
-		$path = $this->_get_path($path);
-		var_dump($path);
+		$path = self::_get_path($path);
 
 		foreach (self::$ghost_dir as $dir => $to) {
 			if (strpos($path, $dir) === 0) {
@@ -251,32 +248,30 @@ final class FileStreamWrapper
 		return $path;
 	}
 
-	private function _get_path($path)
+	static private function _get_path($path)
 	{
+		$tmp = parse_url($path);
+		if (!$tmp || empty($tmp['path'])) {
+			throw new Exception("path:{$path} error");
+		}
+		$host = isset($tmp['host']) ? $tmp['host'] : null;
+
+		$path = $host . $tmp['path'];
+
 		$path = str_replace("\\", '/', $path);
 
-		$path = preg_replace('#^file:#i', '', $path);
-
-		if ($path[0] == '/' || $path[0] == '\\') {
-			return $this->_fix_path($path);
+		if ($path[0] == '/') {
+			return self::_fix_path($path);
 		}
 
-		if (preg_match('#^/|^\w:/#', $path)) {
-			var_dump(11);
-			return $this->_fix_path($path);
-		}
-			var_dump(22);
-		return $this->_fix_path(getcwd() .'/'.$path);
+		return self::_fix_path(getcwd() .'/'.$path);
 	}
 
-	private function _fix_path($path)
+	static private function _fix_path($path)
 	{
-		$new = array();
-		$tmp = explode('/', trim($path, '/'));
+		$tmp = explode('/', $path);
 
-		if ($tmp[0] == "") {
-			$new[] = '/';
-		}
+		$new = array();
 
 		foreach ($tmp as $part) {
 			switch ($part) {
@@ -288,6 +283,10 @@ final class FileStreamWrapper
 			default:
 				$new[] = $part;
 			}
+		}
+
+		if ($path[0] == '/') {
+			return '/'.implode('/', $new);
 		}
 
 		return implode('/', $new);

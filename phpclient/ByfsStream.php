@@ -36,7 +36,7 @@ class ByfsStream
 	const O_SYNC = 0x101000;
 	const O_TRUNC = 0x200;
 
-	private $fp;
+	public $fp;
 	public $errno;
 	public $error;
 
@@ -121,9 +121,15 @@ class ByfsStream
 
 	public function __destruct()
 	{
+		$this->close();
+	}
+
+	public function close()
+	{
 		if ($this->fp) {
 			$this->write_uint16(self::CODE_CLOSE);
 			fclose($this->fp);
+			$this->fp = null;
 		}
 	}
 

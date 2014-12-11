@@ -110,13 +110,15 @@ final class ByfsStreamWrapper
 
 	public function stream_metadata($path, $option, $value)
 	{
-		$path = substr($path, strlen("byfs://"));
 		return false;
 	}
 
     public function stream_open($path, $mode, $options, &$opened_path)
     {
 		$path = substr($path, strlen("byfs://"));
+		if ($path[0] != "/") {
+			$path = "/" . $path;
+		}
 
 		//miss
 		//$use_include_path = $options & STREAM_USE_PATH;
@@ -191,8 +193,9 @@ final class ByfsStreamWrapper
 			$ok = ByfsFileSystem::stat($path);
 		}
 
+		//var_dump($ok, $quiet);
 		if (!$ok && !$quiet) {
-			trigger_error("unlink error! path:{$path}", E_USER_ERROR);
+			trigger_error("url_stat error! path:{$path}", E_USER_WARNING);
 		}
 
 		return $ok;

@@ -83,6 +83,8 @@ class ByfsStreamFile
 	public function close()
 	{
 		if ($this->fp) {
+			if (!$this->stream->fp) { return false; }
+
 			$this->stream->write_uint16(ByfsStream::CODE_FILE_CLOSE);
 			$this->stream->write_uint32($this->fp);
 			$this->fp = null;
@@ -147,6 +149,8 @@ class ByfsStreamFile
 
 	public function flush()
 	{
+		if (!$this->stream->fp) { return false; }
+
 		$this->stream->write_uint16(ByfsStream::CODE_FILE_FLUSH);
 		$this->stream->write_uint32($this->fp);
 		return $this->stream->read_bool();
