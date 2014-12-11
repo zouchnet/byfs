@@ -5,27 +5,27 @@
  */
 class ByfsStream
 {
-	const CODE_AUTH = 8888;
-	const CODE_CLOSE = 9999;
+	const CODE_AUTH = 0xee01;
+	const CODE_CLOSE = 0xee02;
 
-	const CODE_FILE_OPEN = 1;
-	const CODE_FILE_READ = 2;
-	const CODE_FILE_WRITE = 3;
-	const CODE_FILE_SEEK = 4;
-	const CODE_FILE_STAT = 5;
-	const CODE_FILE_FLUSH = 6;
-	const CODE_FILE_TRUNCATE = 7;
-	const CODE_FILE_CLOSE = 8;
+	const CODE_FILE_OPEN = 0xff01;
+	const CODE_FILE_READ = 0xff02;
+	const CODE_FILE_WRITE = 0xff03;
+	const CODE_FILE_SEEK = 0xff04;
+	const CODE_FILE_STAT = 0xff05;
+	const CODE_FILE_FLUSH = 0xff06;
+	const CODE_FILE_TRUNCATE = 0xff07;
+	const CODE_FILE_CLOSE = 0xff08;
 
-	const CODE_DIR_OPEN = 1001;
-	const CODE_DIR_READ = 1002;
-	const CODE_DIR_CLOSE = 1003;
+	const CODE_DIR_OPEN = 0xfe01;
+	const CODE_DIR_READ = 0xfe02;
+	const CODE_DIR_CLOSE = 0xfe03;
 
-	const CODE_MKDIR = 2001;
-	const CODE_RMDIR = 2002;
-	const CODE_COPY = 2003;
-	const CODE_STAT = 2004;
-	const CODE_LSTAT = 2005;
+	const CODE_MKDIR = 0xfc01;
+	const CODE_RMDIR = 0xfc02;
+	const CODE_COPY = 0xfc03;
+	const CODE_STAT = 0xfc04;
+	const CODE_LSTAT = 0xfc05;
 
 	const O_RDONLY = 0x0;
 	const O_WRONLY = 0x1;
@@ -131,13 +131,15 @@ class ByfsStream
 	{
 		$num = $this->read_uint8();
 
-		if ($num != 0) {
+		if ($num == 0xff) {
+			return true;
+		} else if ($num == 0xfe) {
 			$this->errno = $num;
 			$this->error = $this->read_string();
 			return false;
 		}
 
-		return true;
+		throw new Exception("bool val err");
 	}
 
 	public function read_array_string()

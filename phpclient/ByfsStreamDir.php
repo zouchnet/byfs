@@ -77,7 +77,7 @@ class ByfsStreamDir
 		$ok = $this->stream->read_bool();
 		if (!$ok) {
 			$this->eof = true;
-			return
+			return;
 		}
 		$this->dirs = $this->stream->read_array_string();
 

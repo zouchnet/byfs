@@ -22,7 +22,7 @@ final class FileStreamWrapper
 
 	static public function unregister()
 	{
-		stream_wrapper_restore('file')
+		stream_wrapper_restore('file');
 	}
 
 	public function dir_closedir()
@@ -310,7 +310,7 @@ final class FileStreamWrapper
 	/**
 	 * 递归移动文件
 	 */
-	private function _move_dir($from $to)
+	private function _move_dir($from, $to)
 	{
 		$hd = opendir($from);
 		if (!$hd) { return false; }

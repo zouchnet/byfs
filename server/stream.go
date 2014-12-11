@@ -13,34 +13,34 @@ import (
 )
 
 const (
-	CODE_AUTH = 8888
-	CODE_CLOSE = 9999
+	CODE_AUTH = 0xee01
+	CODE_CLOSE = 0xee02
 
-	CODE_FILE_OPEN = 1
-	CODE_FILE_READ = 2
-	CODE_FILE_WRITE = 3
-	CODE_FILE_SEEK = 4
-	CODE_FILE_STAT = 5
-	CODE_FILE_FLUSH = 6
-	CODE_FILE_TRUNCATE = 7
-	CODE_FILE_CLOSE = 8
+	CODE_FILE_OPEN = 0xff01
+	CODE_FILE_READ = 0xff02
+	CODE_FILE_WRITE = 0xff03
+	CODE_FILE_SEEK = 0xff04
+	CODE_FILE_STAT = 0xff05
+	CODE_FILE_FLUSH = 0xff06
+	CODE_FILE_TRUNCATE = 0xff07
+	CODE_FILE_CLOSE = 0xff08
 
-	CODE_DIR_OPEN = 1001
-	CODE_DIR_READ = 1002
-	CODE_DIR_CLOSE = 1003
+	CODE_DIR_OPEN = 0xfe01
+	CODE_DIR_READ = 0xfe02
+	CODE_DIR_CLOSE = 0xfe03
 
-	CODE_MKDIR = 2001
-	CODE_RMDIR = 2002
-	CODE_RENAME = 2003
-	CODE_STAT = 2004
-	CODE_LSTAT = 2005
+	CODE_MKDIR = 0xfc01
+	CODE_RMDIR = 0xfc02
+	CODE_RENAME = 0xfc03
+	CODE_STAT = 0xfc04
+	CODE_LSTAT = 0xfc05
 )
 
 var (
 	//成功
-	status_ok uint8 = 0
+	status_ok uint8 = 0xff
 	//失败
-	status_fail uint8 = 1
+	status_fail uint8 = 0xfe
 )
 
 var actionTimeout = 3 * time.Second
@@ -177,7 +177,7 @@ func (f *fconn) run() {
 			return
 		}
 
-		log.Println("code", code)
+		log.Printf("code 0x%x", code)
 		f._run(code)
 	}
 }
@@ -325,6 +325,7 @@ func (f *fconn) a_fseek() {
 		panic(WarningError(err.Error()))
 	}
 
+	_ = off
 	f.writeTimeLimit()
 	f.writeUint8(status_ok)
 	f.writeInt64(off)
@@ -653,7 +654,7 @@ func (f *fconn) readInt64() (number int64) {
 // ------ 读取 uint ----------------
 
 func (f *fconn) readUint8() (number uint8) {
-	err := binary.Write(f.bufrw, binary.BigEndian, &number)
+	err := binary.Read(f.bufrw, binary.BigEndian, &number)
 	if err != nil {
 		panic(FatalError(err.Error()))
 	}

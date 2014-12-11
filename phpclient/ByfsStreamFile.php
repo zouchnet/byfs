@@ -166,7 +166,7 @@ class ByfsStreamFile
 		case SEEK_END: $mode = 2; break;
 		default : throw new Exception('seek whence error!');
 		}
-		var_dump($offset, $mode);
+		//var_dump($offset, $mode);
 
 		$this->stream->write_uint16(ByfsStream::CODE_FILE_SEEK);
 		$this->stream->write_uint32($this->fp);
@@ -178,7 +178,6 @@ class ByfsStreamFile
 			return -1;
 		}
 		$this->offset = $this->stream->read_int64();
-		var_dump('re', $this->offset);
 		$this->eof = false;
 		return 0;
     }
