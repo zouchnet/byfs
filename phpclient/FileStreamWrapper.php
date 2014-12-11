@@ -9,7 +9,6 @@ final class FileStreamWrapper
 {
 	//需要无缝转移的目录(绝对路径)
 	static public $ghost_dir = array();
-	static public $ghost_protocol = 'byfs';
 
 	private $fp;
 	private $dir;
@@ -23,6 +22,14 @@ final class FileStreamWrapper
 	static public function unregister()
 	{
 		stream_wrapper_restore('file');
+	}
+
+	static public function add_ghost_dir($dir, $to)
+	{
+		$_dir = str_replace("\\", '/', $dir);
+		$_to = str_replace("\\", '/', $to);
+
+		self::$ghost_dir[$_dir] = $_to;
 	}
 
 	public function dir_closedir()
@@ -227,14 +234,16 @@ final class FileStreamWrapper
 
 	private function _realpath($path, &$ghost=null)
 	{
+		var_dump($path);
 		$path = $this->_get_path($path);
+		var_dump($path);
 
-		foreach (self::ghost_dir as $dir => $to) {
+		foreach (self::$ghost_dir as $dir => $to) {
 			if (strpos($path, $dir) === 0) {
 				$path = substr($path, strlen($dir));
 
 				$ghost = true;
-				return self::ghost_protocol."://". trim($to, '/') . '/'. ltrim($path, '/');
+				return $to . '/'. ltrim($path, '/');
 			}
 		}
 
@@ -244,21 +253,30 @@ final class FileStreamWrapper
 
 	private function _get_path($path)
 	{
+		$path = str_replace("\\", '/', $path);
+
 		$path = preg_replace('#^file:#i', '', $path);
 
 		if ($path[0] == '/' || $path[0] == '\\') {
 			return $this->_fix_path($path);
 		}
 
+		if (preg_match('#^/|^\w:/#', $path)) {
+			var_dump(11);
+			return $this->_fix_path($path);
+		}
+			var_dump(22);
 		return $this->_fix_path(getcwd() .'/'.$path);
 	}
 
 	private function _fix_path($path)
 	{
-		$path = str_replace("\\", '/', $path);
-
 		$new = array();
 		$tmp = explode('/', trim($path, '/'));
+
+		if ($tmp[0] == "") {
+			$new[] = '/';
+		}
 
 		foreach ($tmp as $part) {
 			switch ($part) {
@@ -272,7 +290,7 @@ final class FileStreamWrapper
 			}
 		}
 
-		return '/'.implode('/', $part);
+		return implode('/', $new);
 	}
 
 	/**
